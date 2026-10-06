@@ -34,7 +34,7 @@ def load_image(name, size=None, alpha=True):
         img = img.convert_alpha() if alpha else img.convert()
     except (pygame.error, FileNotFoundError):
         print(f"[dampa] could not load '{name}' - using a placeholder instead "
-              f"(put it in the same folder as this script)")
+            f"(put it in the same folder as this script)")
         return None
     if size:
         img = pygame.transform.scale(img, size)
@@ -153,6 +153,24 @@ HANDS_H = HANDS_TOP_IMG.get_height() + HANDS_ARMS_IMG.get_height()
 HANDS_TOP = HEIGHT + 10 - HANDS_H      # the arms end just below the bottom edge of the screen
 BANDS = make_bands()
 BAND_ICON = scaled_to_width(BANDS, 44)
+# ----- card images for GAME MODES screen -----
+# Ilagay mo yung mga picture files sa parehong folder ng main.py
+# Pangalan: karera_card.png at pogs_card.png
+CARD_IMG_W = 220   # 220px lapad
+CARD_IMG_H = 280   # taas ng picture
+
+KARERA_IMG = load_image("karera_card.png", (CARD_IMG_W, CARD_IMG_H))
+POGS_IMG = load_image("pogs_card.png", (CARD_IMG_W, CARD_IMG_H))
+
+# Kung wala yung files, gumawa ng placeholder (gray background)
+if KARERA_IMG is None:
+    KARERA_IMG = pygame.Surface((CARD_IMG_W, CARD_IMG_H))
+    KARERA_IMG.fill((150, 150, 150))  # gray
+
+if POGS_IMG is None:
+    POGS_IMG = pygame.Surface((CARD_IMG_W, CARD_IMG_H))
+    POGS_IMG.fill((150, 150, 150))  # gray
+
 
 # ----- fonts (swap None for a pixel .ttf to get the pixel look) -----
 BIG_FONT = pygame.font.Font(None, 56)
@@ -171,7 +189,7 @@ BEIGE_DARK = (176, 149, 102, 190)
 BEIGE_HOVER = (206, 176, 124, 225)
 YESNO = (150, 100, 55)
 YESNO_HOVER = (176, 124, 72)
-HUD_COLOR = (246, 208, 150)
+HUD_COLOR = (139, 69, 19)  # brown
 
 
 def panel(rect, color=BEIGE, target=None):
@@ -202,7 +220,7 @@ BTN_W, BTN_H, GAP = 340, 72, 18
 BTN_X = (WIDTH - BTN_W) // 2
 BTN_Y = 340
 MENU_BUTTONS = {
-    "START": pygame.Rect(BTN_X, BTN_Y, BTN_W, BTN_H),
+    "GAMEMODES": pygame.Rect(BTN_X, BTN_Y, BTN_W, BTN_H),
     "SCORE": pygame.Rect(BTN_X, BTN_Y + (BTN_H + GAP), BTN_W, BTN_H),
     "EXIT": pygame.Rect(BTN_X, BTN_Y + (BTN_H + GAP) * 2, BTN_W, BTN_H),
 }
@@ -216,27 +234,55 @@ DESCRIPTION = [
 PANEL_W = 472
 PANEL_X = (WIDTH - PANEL_W) // 2
 
-SCORE_HEADER = pygame.Rect(PANEL_X, 130, 330, 70)
-SCORE_TABLE = pygame.Rect(PANEL_X, 210, PANEL_W, 365)
-SCORE_BACK = pygame.Rect(PANEL_X + PANEL_W - 160, 585, 160, 54)
-COL_SPLIT = 125
-HEAD_ROW_H = 55
-ROW_H = 44
-MAX_ROWS = 7
+SCORE_HEADER = pygame.Rect(390, 100, 180, 60)
+SCORE_TABLE = pygame.Rect(390, 170, 520, 365)
+SCORE_BACK = pygame.Rect(SCORE_TABLE.right - 160, 555, 160, 54)
+COL_STREAK = 110
+COL_BOT = 70
+COL_YOU = 70
+COL_GAMEMODES = 270
+HEAD_ROW_H = 45
+ROW_H = 40
+MAX_ROWS = 20
+SCROLL_SPEED = 40        # pixels per scroll
+scroll_offset = 0        # current scroll position
 
 EXIT_HEADER = pygame.Rect(PANEL_X, 215, 280, 70)
 EXIT_PANEL = pygame.Rect(PANEL_X, 295, PANEL_W, 165)
 EXIT_YES = pygame.Rect(PANEL_X + 22, 385, 205, 48)
 EXIT_NO = pygame.Rect(PANEL_X + PANEL_W - 22 - 205, 385, 205, 48)
-EXIT_BACK = pygame.Rect(PANEL_X + PANEL_W - 160, 475, 160, 54)
+
+
+# =====================================================================
+#  GAME MODES SCREEN LAYOUT
+# =====================================================================
+CARD_W, CARD_H = 260, 420
+CARD_GAP = 40
+CARD_Y = 140
+
+TOTAL_CARDS_W = (CARD_W * 2) + CARD_GAP
+CARD_START_X = (WIDTH - TOTAL_CARDS_W) // 2
+
+CARD1_RECT = pygame.Rect(CARD_START_X, CARD_Y, CARD_W, CARD_H)
+CARD2_RECT = pygame.Rect(CARD_START_X + CARD_W + CARD_GAP, CARD_Y, CARD_W, CARD_H)
+
+MODE_START_W, MODE_START_H = 180, 50
+MODE1_START = pygame.Rect(CARD1_RECT.centerx - MODE_START_W // 2, CARD1_RECT.bottom - 70, MODE_START_W, MODE_START_H)
+MODE2_START = pygame.Rect(CARD2_RECT.centerx - MODE_START_W // 2, CARD2_RECT.bottom - 70, MODE_START_W, MODE_START_H)
+
+MODE_BACK = pygame.Rect(WIDTH // 2 - 80, HEIGHT - 70, 160, 50)
 
 
 #  SCORE DATA
 
 SCORE_FILE = "scores.json"
 DEFAULT_SCORES = [
-    ["win", 3, 1], ["win", 3, 2], ["loss", 0, 4],
-    ["loss", 2, 3], ["tie", 2, 2], ["loss", 1, 3],
+    ["win", 1, 3, "DAMPA KARERA"],
+    ["win", 1, 3, "DAMPA KARERA"],
+    ["defeat", 3, 1, "DAMPA POGS"],
+    ["defeat", 0, 4, "DAMPA POGS"],
+    ["tie", 2, 2, "DAMPA POGS"],
+    ["defeat", 3, 1, "DAMPA POGS"],
 ]
 
 
@@ -244,17 +290,27 @@ def load_scores():
     if os.path.exists(SCORE_FILE):
         try:
             with open(SCORE_FILE) as f:
-                return json.load(f)
+                data = json.load(f)
+            # Siguraduhing 4 elements ang bawat row
+            fixed = []
+            for row in data:
+                if len(row) == 3:
+                    # Lumang format: [result, player, bot] -> gawing [result, bot, player, mode]
+                    fixed.append([row[0], row[2], row[1], "DAMPA KARERA"])
+                elif len(row) == 4:
+                    fixed.append(row)
+            return fixed if fixed else list(DEFAULT_SCORES)
         except (json.JSONDecodeError, OSError):
             pass
     return list(DEFAULT_SCORES)
 
 
-def add_result(player, bot, result=None):
+def add_result(player, bot, mode="DAMPA KARERA", result=None):
     if result is None:
-        result = "win" if player > bot else "loss" if player < bot else "tie"
-    SCORES.append([result, player, bot])
-    del SCORES[:-MAX_ROWS]
+        result = "win" if player > bot else "defeat" if player < bot else "tie"
+    # Idagdag sa UNANG position (top), hindi sa dulo
+    SCORES.insert(0, [result, bot, player, mode])
+    del SCORES[MAX_ROWS:]  # tanggalin ang sobrang rows sa dulo
     try:
         with open(SCORE_FILE, "w") as f:
             json.dump(SCORES, f)
@@ -269,7 +325,7 @@ SCORES = load_scores()
 
 ROUNDS = 4
 BANDS_COUNT = 50                     # the "x50" in the HUD
-SWEEP_TIMES = [1.6, 1.4, 1.2, 1.0]  # seconds for the meter to go 0 -> 1 (faster each round)
+SWEEP_TIMES = [0.6, 0.5, 0.4, 0.3]  # seconds for the meter to go 0 -> 1 (faster each round)
 METER_TIMEOUT = 4.0                  # meter auto-stops if the player never presses
 LOCK_PAUSE = 0.8                     # short pause after both meters are locked
 TIMER_MIN, TIMER_MAX = 1.0, 3.0      # random wait before the smash
@@ -284,7 +340,7 @@ FINISH_SMASHES = 2.5                 # finish line = this many PERFECT smashes a
 FINISH_DIST = int(MAX_DIST * FINISH_SMASHES)   # distance is kept between smashes, resets every round
 WHITE_HALF = 0.08                    # half-width of the white (perfect) zone of the meter
 GREEN_HALF = 0.25                    # half-width of the green zone
-BOT_SPREAD = 0.16                    # bot accuracy: smaller = better aim at the white zone
+BOT_SPREAD = 0.6                    # bot accuracy: smaller = better aim at the white zone
 METER_W, METER_H, METER_Y = 260, 12, 610
 
 T_IMPACT = 0.25                      # moment the hands hit the floor (seconds after smash starts)
@@ -439,7 +495,7 @@ class Game:
                 else:
                     if not self.saved:
                         self.final = self.final_result()
-                        add_result(self.player_wins, self.bot_wins)
+                        add_result(self.player_wins, self.bot_wins, "DAMPA KARERA")
                         self.saved = True
                     self.set_phase("end")
 
@@ -619,24 +675,38 @@ class Game:
             WIN.blit(surf, (ox + sx, sy))
         pygame.draw.line(WIN, (15, 15, 15), (HALF, 0), (HALF, HEIGHT), 3)
 
-        # names + round wins
-        text_center(BIG_FONT, f"BOT  {self.bot_wins}", TEXT_COLOR, (95, 40), shadow=True)
-        text_center(BIG_FONT, f"YOU  {self.player_wins}", TEXT_COLOR, (WIDTH - 95, 40), shadow=True)
+        # ===== ROUND WINS LABELS (3px gap lang) =====
+        
+        # ---- LEFT SIDE (BOT) ----
+        # "ROUND WINS" box (taas) - 3px gap mula sa center box
+        bot_label = pygame.Rect(WIDTH // 2 - 273, 10, 140, 30)
+        pygame.draw.rect(WIN, HUD_COLOR, bot_label)
+        text_center(SMALL_FONT, "ROUND WINS", TEXT_COLOR, bot_label.center, shadow=True)
+        
+        # Bot score box (ibaba) - naka-center sa label
+        bot_score = pygame.Rect(WIDTH // 2 - 223, 45, 90, 45)
+        pygame.draw.rect(WIN, HUD_COLOR, bot_score)
+        text_center(BIG_FONT, str(self.bot_wins), TEXT_COLOR, bot_score.center, shadow=True)
 
-        # HUD
-        panel(HUD_LEFT, HUD_COLOR)
-        WIN.blit(BAND_ICON, BAND_ICON.get_rect(midleft=(HUD_LEFT.x + 12, HUD_LEFT.centery)))
-        text_center(MID_FONT, f"X{BANDS_COUNT}", BROWN, (HUD_LEFT.x + 116, HUD_LEFT.centery))
+        # ---- CENTER ----
+        # "ROUND 1" box (gitna)
+        center_box = pygame.Rect(WIDTH // 2 - 130, 10, 260, 80)
+        pygame.draw.rect(WIN, HUD_COLOR, center_box)
+        text_center(BIG_FONT, f"ROUND {min(self.round, ROUNDS)}", TEXT_COLOR,
+                    (center_box.centerx, center_box.y + 28), shadow=True)
+        text_center(DESC_FONT, self.hud_message(), TEXT_COLOR,
+                    (center_box.centerx, center_box.y + 58), shadow=True)
 
-        panel(HUD_RIGHT, HUD_COLOR)
-        text_center(MID_FONT, f"X{BANDS_COUNT}", BROWN, (HUD_RIGHT.x + 60, HUD_RIGHT.centery))
-        WIN.blit(BAND_ICON, BAND_ICON.get_rect(midright=(HUD_RIGHT.right - 12, HUD_RIGHT.centery)))
-
-        panel(HUD_CENTER, HUD_COLOR)
-        text_center(BIG_FONT, f"ROUND {min(self.round, ROUNDS)}/{ROUNDS}", BROWN,
-                    (HUD_CENTER.centerx, HUD_CENTER.y + 24))
-        text_center(SMALL_FONT, self.hud_message(), BROWN,
-                    (HUD_CENTER.centerx, HUD_CENTER.y + 54))
+        # ---- RIGHT SIDE (PLAYER) ----
+        # "ROUND WINS" box (taas) - 3px gap mula sa center box
+        player_label = pygame.Rect(WIDTH // 2 + 133, 10, 140, 30)
+        pygame.draw.rect(WIN, HUD_COLOR, player_label)
+        text_center(SMALL_FONT, "ROUND WINS", TEXT_COLOR, player_label.center, shadow=True)
+        
+        # Player score box (ibaba) - naka-center sa label
+        player_score = pygame.Rect(WIDTH // 2 + 133, 45, 90, 45)
+        pygame.draw.rect(WIN, HUD_COLOR, player_score)
+        text_center(BIG_FONT, str(self.player_wins), TEXT_COLOR, player_score.center, shadow=True)
 
         if self.phase == "end":
             self.draw_end(mouse)
@@ -670,50 +740,140 @@ def draw_menu(mouse):
 
 
 def draw_score(mouse):
+    global scroll_offset
     WIN.blit(BG_BLUR, (0, 0))
-    panel(SCORE_HEADER)
+    
+    # SCORE header
+    header_surf = pygame.Surface(SCORE_HEADER.size, pygame.SRCALPHA)
+    header_surf.fill((232, 206, 160, 200))
+    WIN.blit(header_surf, SCORE_HEADER.topleft)
     text_center(BIG_FONT, "SCORE", BROWN, SCORE_HEADER.center)
 
-    panel(SCORE_TABLE)
+    # Table
+    table_surf = pygame.Surface(SCORE_TABLE.size, pygame.SRCALPHA)
+    table_surf.fill((232, 206, 160, 180))
+    WIN.blit(table_surf, SCORE_TABLE.topleft)
+    
     t = SCORE_TABLE
-    split_x = t.x + COL_SPLIT
-    text_center(SMALL_FONT, "STREAK", BROWN, (t.x + COL_SPLIT // 2, t.y + HEAD_ROW_H // 2))
-    text_center(SMALL_FONT, "SCORE", BROWN, ((split_x + t.right) // 2, t.y + HEAD_ROW_H // 2))
+    
+    # Column x positions
+    col1_x = t.x + COL_STREAK // 2
+    col2_x = t.x + COL_STREAK + COL_BOT // 2
+    col3_x = t.x + COL_STREAK + COL_BOT + COL_YOU // 2
+    col4_x = t.x + COL_STREAK + COL_BOT + COL_YOU + COL_GAMEMODES // 2
+    
+    # ===== HEADER ROW (HINDI GUMAGALAW) =====
+    text_center(SMALL_FONT, "STREAK", BROWN, (col1_x, t.y + HEAD_ROW_H // 2))
+    text_center(SMALL_FONT, "BOT", BROWN, (col2_x, t.y + HEAD_ROW_H // 2))
+    text_center(SMALL_FONT, "YOU", BROWN, (col3_x, t.y + HEAD_ROW_H // 2))
+    text_center(SMALL_FONT, "GAMEMODES", BROWN, (col4_x, t.y + HEAD_ROW_H // 2))
+    
+    pygame.draw.line(WIN, LINE_BROWN, (t.x, t.y + HEAD_ROW_H), (t.right, t.y + HEAD_ROW_H), 2)
+    
+    v1 = t.x + COL_STREAK
+    v2 = v1 + COL_BOT
+    v3 = v2 + COL_YOU
+    pygame.draw.line(WIN, LINE_BROWN, (v1, t.y + 6), (v1, t.y + HEAD_ROW_H), 2)
+    pygame.draw.line(WIN, LINE_BROWN, (v2, t.y + 6), (v2, t.y + HEAD_ROW_H), 2)
+    pygame.draw.line(WIN, LINE_BROWN, (v3, t.y + 6), (v3, t.y + HEAD_ROW_H), 2)
 
-    for i in range(MAX_ROWS + 1):
-        y = t.y + HEAD_ROW_H + i * ROW_H
-        pygame.draw.line(WIN, LINE_BROWN, (t.x, y), (t.right, y), 3)
+    # ===== SCROLLABLE LIST (Scores lang) =====
+    clip_rect = pygame.Rect(t.x, t.y + HEAD_ROW_H, t.width, t.height - HEAD_ROW_H)
+    old_clip = WIN.get_clip()
+    WIN.set_clip(clip_rect)
+    
+    for i, row in enumerate(SCORES[:MAX_ROWS]):
+        result, bot, player, mode = row
+        cy = t.y + HEAD_ROW_H + i * ROW_H + ROW_H // 2 - scroll_offset
+        
+        if cy < t.y + HEAD_ROW_H - ROW_H or cy > t.bottom + ROW_H:
+            continue
+        
+        color = (60, 180, 60) if result == "win" else (220, 60, 60) if result == "defeat" else BROWN
+        text_center(MID_FONT, result, color, (col1_x, cy))
+        text_center(MID_FONT, str(bot), BROWN, (col2_x, cy))
+        text_center(MID_FONT, str(player), BROWN, (col3_x, cy))
+        text_center(SMALL_FONT, mode, BROWN, (col4_x, cy))
+    
+    for i in range(MAX_ROWS):
+        y = t.y + HEAD_ROW_H + (i + 1) * ROW_H - scroll_offset
+        if t.y + HEAD_ROW_H < y < t.bottom:
+            pygame.draw.line(WIN, LINE_BROWN, (t.x, y), (t.right, y), 2)
+    
+    pygame.draw.line(WIN, LINE_BROWN, (v1, t.y + HEAD_ROW_H), (v1, t.bottom), 2)
+    pygame.draw.line(WIN, LINE_BROWN, (v2, t.y + HEAD_ROW_H), (v2, t.bottom), 2)
+    pygame.draw.line(WIN, LINE_BROWN, (v3, t.y + HEAD_ROW_H), (v3, t.bottom), 2)
+    
+    WIN.set_clip(old_clip)
 
-    for i, (result, player, bot) in enumerate(SCORES[-MAX_ROWS:]):
-        cy = t.y + HEAD_ROW_H + i * ROW_H + ROW_H // 2
-        text_center(MID_FONT, result, BROWN, (t.x + COL_SPLIT // 2, cy))
-        text_center(MID_FONT, f"you {player}/{bot} bot", BROWN, ((split_x + t.right) // 2, cy))
-
-    pygame.draw.line(WIN, LINE_BROWN, (split_x, t.y + 6), (split_x, t.bottom - 6), 3)
     button(SCORE_BACK, "BACK", SCORE_BACK.collidepoint(mouse), MID_FONT)
 
 
 def draw_exit(mouse):
     WIN.blit(BG_BLUR, (0, 0))
-    panel(EXIT_HEADER)
+    
+    # EXIT header - transparent slight
+    header_surf = pygame.Surface(EXIT_HEADER.size, pygame.SRCALPHA)
+    header_surf.fill((232, 206, 160, 200))  # alpha 200
+    WIN.blit(header_surf, EXIT_HEADER.topleft)
     text_center(BIG_FONT, "EXIT", BROWN, EXIT_HEADER.center)
 
-    panel(EXIT_PANEL)
+    # EXIT panel - transparent slight
+    panel_surf = pygame.Surface(EXIT_PANEL.size, pygame.SRCALPHA)
+    panel_surf.fill((232, 206, 160, 180))  # alpha 180
+    WIN.blit(panel_surf, EXIT_PANEL.topleft)
+    
     text_center(MID_FONT, "are you sure you", BROWN, (EXIT_PANEL.centerx, EXIT_PANEL.y + 40))
     text_center(MID_FONT, "want to quit?", BROWN, (EXIT_PANEL.centerx, EXIT_PANEL.y + 68))
 
     for rect, label in ((EXIT_YES, "yes"), (EXIT_NO, "no")):
         pygame.draw.rect(WIN, YESNO_HOVER if rect.collidepoint(mouse) else YESNO, rect)
         text_center(MID_FONT, label, (255, 235, 200), rect.center)
+    
+    # WALANG BACK BUTTON
 
-    button(EXIT_BACK, "BACK", EXIT_BACK.collidepoint(mouse), MID_FONT)
 
+def draw_gamemodes(mouse):
+    WIN.blit(BG_BLUR, (0, 0))
+    
+    # ===== CARD 1: DAMPA KARERA =====
+    # Brown border
+    pygame.draw.rect(WIN, (139, 90, 43), CARD1_RECT)
+    # Beige inner background
+    inner1 = CARD1_RECT.inflate(-16, -16)
+    panel(inner1, BEIGE)
+    
+    # Picture sa loob ng card
+    img1_rect = KARERA_IMG.get_rect(center=(CARD1_RECT.centerx, CARD1_RECT.y + CARD_IMG_H // 2 + 30))
+    WIN.blit(KARERA_IMG, img1_rect)
+    
+    # Label at START button
+    text_center(MID_FONT, "DAMPA KARERA", BROWN, (CARD1_RECT.centerx, CARD1_RECT.bottom - 90))
+    button(MODE1_START, "START", MODE1_START.collidepoint(mouse), MID_FONT)
+
+    # ===== CARD 2: DAMPA POGS =====
+    # Brown border
+    pygame.draw.rect(WIN, (139, 90, 43), CARD2_RECT)
+    # Beige inner background
+    inner2 = CARD2_RECT.inflate(-16, -16)
+    panel(inner2, BEIGE)
+    
+    # Picture sa loob ng card
+    img2_rect = POGS_IMG.get_rect(center=(CARD2_RECT.centerx, CARD2_RECT.y + CARD_IMG_H // 2 + 30))
+    WIN.blit(POGS_IMG, img2_rect)
+    
+    # Label at START button
+    text_center(MID_FONT, "DAMPA POGS", BROWN, (CARD2_RECT.centerx, CARD2_RECT.bottom - 90))
+    button(MODE2_START, "START", MODE2_START.collidepoint(mouse), MID_FONT)
+
+    # ===== BACK BUTTON =====
+    button(MODE_BACK, "BACK", MODE_BACK.collidepoint(mouse), MID_FONT)
 
 # =====================================================================
 #  MAIN LOOP
 # =====================================================================
 def main():
-    screen = "menu"          # "menu" | "score" | "exit" | "game"
+    screen = "menu"          # "menu" | "score" | "exit" | "gamemodes" | "game"
     game = None
     run = True
 
@@ -732,25 +892,44 @@ def main():
                 continue
 
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                screen = "exit" if screen == "menu" else "menu"
+                if screen == "menu":
+                    screen = "exit"
+                elif screen == "gamemodes":
+                    screen = "menu"
+                else:
+                    screen = "menu"
+                                # Scroll event para sa SCORE screen
+            if screen == "score" and event.type == pygame.MOUSEWHEEL:
+                global scroll_offset
+                scroll_offset -= event.y * SCROLL_SPEED
+                # Limit: 0 hanggang (MAX_ROWS * ROW_H) - table height
+                max_scroll = max(0, MAX_ROWS * ROW_H - (SCORE_TABLE.height - HEAD_ROW_H))
+                scroll_offset = max(0, min(scroll_offset, max_scroll))
 
             elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 pos = event.pos
                 if screen == "menu":
-                    if MENU_BUTTONS["START"].collidepoint(pos):
-                        game = Game()
-                        screen = "game"
+                    if MENU_BUTTONS["GAMEMODES"].collidepoint(pos):
+                        screen = "gamemodes"
                     elif MENU_BUTTONS["SCORE"].collidepoint(pos):
                         screen = "score"
                     elif MENU_BUTTONS["EXIT"].collidepoint(pos):
                         screen = "exit"
+                elif screen == "gamemodes":
+                    if MODE1_START.collidepoint(pos):
+                        game = Game()
+                        screen = "game"
+                    elif MODE2_START.collidepoint(pos):
+                        print("Pogs game is not yet implemented!")
+                    elif MODE_BACK.collidepoint(pos):
+                        screen = "menu"
                 elif screen == "score":
                     if SCORE_BACK.collidepoint(pos):
                         screen = "menu"
                 elif screen == "exit":
                     if EXIT_YES.collidepoint(pos):
                         run = False
-                    elif EXIT_NO.collidepoint(pos) or EXIT_BACK.collidepoint(pos):
+                    elif EXIT_NO.collidepoint(pos):
                         screen = "menu"
 
         if screen == "menu":
@@ -759,6 +938,8 @@ def main():
             draw_score(mouse)
         elif screen == "exit":
             draw_exit(mouse)
+        elif screen == "gamemodes":
+            draw_gamemodes(mouse)
         else:
             game.update(dt)
             game.draw(mouse)
