@@ -514,14 +514,14 @@ UI_FILES = {
     "normal":        "normal.png",          # blue button
     "hard":          "hard.png",            # red button
     # SCORE screen = 3 separate pictures
-    "score_wood":    "score_boarder.png",      # the big wooden board
-    "score_paper":   "board2.png",     # the pink paper the table is written on
+    "score_wood":    "score_boarders_boarder.png",      # the big wooden board
+    "score_paper":   "score_boarder.png",     # the pink paper the table is written on
     "score_sign":    "score_sign.png",      # the hanging SCORE sign (with its chains)
     # EXIT screen = 2 separate pictures
     "exit_sign":     "exit_sign.png",       # the hanging EXIT sign (with its chains)
     "exit_paper":    "board2.png",      # the paper with the question
     # in-game menu
-    "pause_panel":   "pause_panel.png",     # paper panel (no buttons)
+    "pause_panel":   "board2.png",     # paper panel (no buttons)
     "hamburger":     "hamburger.png",       # the menu icon button
 }
 BTN_KEY = {"gold": "button", "green": "easy", "blue": "normal", "red": "hard"}
