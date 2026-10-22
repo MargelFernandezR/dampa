@@ -1393,14 +1393,6 @@ class Game:
         button(END_MENU, "MENU", END_MENU.collidepoint(mouse), MID_FONT)
 
 
-# =====================================================================
-#  DAMPA POGS  (game mode)
-#
-#  Optional image files (same folder as main.py). The game still runs without them:
-#      pogs_floor.png  -> top-down floor / asphalt photo (1300x700 is best)
-#      pog.png         -> the pog artwork (square image)
-#      arm_pix-removebg-preview.png -> the hands (same file Dampa Karera uses)
-# =====================================================================
 CX, CY = WIDTH // 2, 300            # center of the floor where the pogs sit
 
 STACK_MIN, STACK_MAX = 15, 30       # every game starts with a different random stack (15 to 30 pogs)
@@ -1408,7 +1400,7 @@ MAX_STACK = STACK_MAX               # the stack can never be bigger than this
 TARGET_R = 34                       # radius of the click-circles (px)
 TURN_TIME = 5.0                     # seconds each player has to stop the meter
 POG_D = 72                          # pog size on screen (px)
-POG_FILES = ["pog1-removebg.png", "pog2-removebg.png", "pog3-removebg.png", "pog4-removebg.png"]   # every pog in the stack gets one of these
+POG_FILES = ["pog1.png", "pog2.png", "pog3.png", "pog4.png"]   # every pog in the stack gets one of these
 
 POGS_T_IMPACT = 0.30                # moment the hands hit the floor (smash phase)
 SMASH_TIME = 0.85
