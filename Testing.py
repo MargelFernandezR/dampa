@@ -17,6 +17,20 @@ try:
 except pygame.error:
     pass
 pygame.init()
+
+# MOUSE CLICK SOUND
+pygame.mixer.init()
+
+click_sound = pygame.mixer.Sound("button-click.mp3")
+click_sound.set_volume(0.5)
+
+# HOME PAGE BACKGROUND MUSIC
+try:
+    pygame.mixer.music.load("Game_BGM.mp3")
+    pygame.mixer.music.set_volume(0.10)
+    pygame.mixer.music.play(-1)
+except pygame.error as e:
+    print("Could not load background music:", e)
 WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
