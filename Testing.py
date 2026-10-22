@@ -2600,7 +2600,7 @@ def main():
                 run = False
                 continue
 
-            # ---------------- IN GAME ----------------
+# ---------------- IN GAME ----------------
             if screen == "game":
                 if not paused:
                     open_pause = (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
