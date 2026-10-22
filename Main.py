@@ -419,8 +419,8 @@ SPEED_LINE.fill((255, 255, 255, 70))
 # ----- card images for GAME MODES screen -----
 # Ilagay mo yung mga picture files sa parehong folder ng main.py
 # Pangalan: karera_card.png at pogs_card.png
-CARD_IMG_W = 220   # 220px lapad
-CARD_IMG_H = 280   # taas ng picture
+CARD_IMG_W = 270   # 220px lapad
+CARD_IMG_H = 340   # taas ng picture
 
 
 def placeholder_card(kind):
@@ -440,8 +440,8 @@ def placeholder_card(kind):
     return s
 
 
-KARERA_IMG = load_image("karera_card.png", (CARD_IMG_W, CARD_IMG_H)) or placeholder_card("karera")
-POGS_IMG = load_image("pogs_card.png", (CARD_IMG_W, CARD_IMG_H)) or placeholder_card("pogs")
+KARERA_IMG = load_image("Goma_Banner.png", (CARD_IMG_W, CARD_IMG_H)) or placeholder_card("karera")
+POGS_IMG = load_image("Pogs_Banner.png", (CARD_IMG_W, CARD_IMG_H)) or placeholder_card("pogs")
 
 
 # ----- fonts (pixel look, no .ttf needed) ----- #
@@ -451,6 +451,7 @@ MID_FONT = PixelFont(34)
 SMALL_FONT = PixelFont(30)
 DESC_FONT = PixelFont(24)
 HUGE_FONT = PixelFont(96)
+TITLE_FONT = PixelFont(70)
 
 # ----- colors ----- # 
 TEXT_COLOR = (255, 255, 255)
@@ -581,7 +582,7 @@ BTN_PAL = {
     "blue":  ((16, 50, 90), (40, 120, 190), (90, 190, 240),  (180, 235, 255), (50, 140, 200)),
     "red":   ((90, 16, 16), (190, 50, 50),  (240, 100, 100), (255, 190, 190), (200, 60, 60)),
 }
-DIFF_PAL = {"EASY": "green", "NORMAL": "blue", "HARD": "red"}
+DIFF_PAL = {"EASY": "green", "MEDIUM": "blue", "HARD": "red"}
 
 
 def hover_amt(key, on):
@@ -715,8 +716,8 @@ def draw_sign(rect, text, font=None):
     nail(rect.right - 36, rect.y + 14)
 
 
-def button(rect, label, hovered, font=BUTTON_FONT, dy=0, pal="gold"):
-    a = hover_amt((rect.topleft, label), hovered)
+def button(rect, label, hovered, font=BUTTON_FONT, dy=0, pal="gold", key=None):
+    a = hover_amt(key or (rect.topleft, label), hovered)
     r = rect.move(0, dy).inflate(int(5 * a) * 2, int(3 * a) * 2)      # grows smoothly on hover
     img = ui_img(BTN_KEY[pal] + "_hover", r.size) if a > 0.5 else None
     has_hover_pic = img is not None
@@ -835,25 +836,39 @@ PAUSE_BUTTONS = {name: pygame.Rect(WIDTH // 2 - 150, 192 + i * 84, 300, 64)
 
 
 # =====================================================================
-#  GAME MODES SCREEN LAYOUT
+#  GAME MODE SCREENS LAYOUT
+#    screen "gamemodes" = PLAYER VS PLAYER / PLAYER VS BOT
+#    screen "botmodes"  = DAMPA KARERA / DAMPA POGS + description + level
 # =====================================================================
-CARD_W, CARD_H = 260, 420
-CARD_GAP = 40
-CARD_Y = 140
+MODE_HEADER = pygame.Rect(WIDTH // 2 - 160, 40, 320, 62)   # small gold sign, like the reference
 
-TOTAL_CARDS_W = (CARD_W * 2) + CARD_GAP
-CARD_START_X = (WIDTH - TOTAL_CARDS_W) // 2
+# --- screen 1: pick the kind of match (cards are wider than tall, like the reference)
+VS_W, VS_H, VS_GAP = 470, 405, 50
+VS_X = (WIDTH - (VS_W * 2 + VS_GAP)) // 2
+VS_Y = 135
+VS_PVP = pygame.Rect(VS_X, VS_Y, VS_W, VS_H)
+VS_PVB = pygame.Rect(VS_X + VS_W + VS_GAP, VS_Y, VS_W, VS_H)
+VS_BACK = pygame.Rect(WIDTH // 2 - 85, HEIGHT - 105, 170, 54)
 
-CARD1_RECT = pygame.Rect(CARD_START_X, CARD_Y, CARD_W, CARD_H)
-CARD2_RECT = pygame.Rect(CARD_START_X + CARD_W + CARD_GAP, CARD_Y, CARD_W, CARD_H)
+# --- screen 2: pick the game, read about it, pick the level
+CARD_W, CARD_H = 300, 500
+CARD_GAP = 30
+CARD_Y = 100
+CARD1_RECT = pygame.Rect(60, CARD_Y, CARD_W, CARD_H)
+CARD2_RECT = pygame.Rect(60 + CARD_W + CARD_GAP, CARD_Y, CARD_W, CARD_H)
+MODE_START_W, MODE_START_H = 200, 50
+START_DY = 200                                  # start button sits this far under the card centre
+MODE1_START = pygame.Rect(0, 0, MODE_START_W, MODE_START_H)
+MODE1_START.center = (CARD1_RECT.centerx, CARD1_RECT.centery + START_DY)
+MODE2_START = pygame.Rect(0, 0, MODE_START_W, MODE_START_H)
+MODE2_START.center = (CARD2_RECT.centerx, CARD2_RECT.centery + START_DY)
 
-MODE_START_W, MODE_START_H = 180, 50
-MODE1_START = pygame.Rect(CARD1_RECT.centerx - MODE_START_W // 2, CARD1_RECT.bottom - 70, MODE_START_W, MODE_START_H)
-MODE2_START = pygame.Rect(CARD2_RECT.centerx - MODE_START_W // 2, CARD2_RECT.bottom - 70, MODE_START_W, MODE_START_H)
+INFO_PANEL = pygame.Rect(740, 80, 520, 520)
+INFO_X = INFO_PANEL.x + 24
+LEVEL_NAMES = ("EASY", "MEDIUM", "HARD")
+LEVEL_RECTS = {name: pygame.Rect(INFO_X + 10, 420 + i * 60, 240, 50) for i, name in enumerate(LEVEL_NAMES)}
+MODE_BACK = pygame.Rect(INFO_PANEL.right - 190, 618, 170, 54)
 
-MODE_BACK = pygame.Rect(WIDTH // 2 - 80, HEIGHT - 70, 160, 50)
-DIFF_BTN = pygame.Rect(WIDTH // 2 - 170, 574, 340, 44)
-MODE_HEADER = pygame.Rect(WIDTH // 2 - 200, 50, 400, 66)
 
 
 #  SCORE DATA
@@ -950,27 +965,31 @@ END_MENU = pygame.Rect(WIDTH // 2 + 15, 400, 220, 56)
 # ---------------------------------------------------------------------
 DIFFICULTIES = {
     "EASY":   dict(BOT_SPREAD=0.60, SWEEP_TIMES=[0.60, 0.50, 0.40, 0.30], WHITE_HALF=0.08,
-                   METER_TIMEOUT=4.0, FINISH_SMASHES=2.5),
-    "NORMAL": dict(BOT_SPREAD=0.25, SWEEP_TIMES=[0.50, 0.42, 0.35, 0.28], WHITE_HALF=0.06,
-                   METER_TIMEOUT=3.0, FINISH_SMASHES=3.0),
+                   METER_TIMEOUT=4.0, FINISH_SMASHES=2.5,
+                   POGS_BOT_SPREAD=0.20, POGS_SWEEP_MUL=1.25, POGS_BOT_HIT=0.65),
+    "MEDIUM": dict(BOT_SPREAD=0.25, SWEEP_TIMES=[0.50, 0.42, 0.35, 0.28], WHITE_HALF=0.06,
+                   METER_TIMEOUT=3.0, FINISH_SMASHES=3.0,
+                   POGS_BOT_SPREAD=0.11, POGS_SWEEP_MUL=1.0, POGS_BOT_HIT=0.88),
     "HARD":   dict(BOT_SPREAD=0.12, SWEEP_TIMES=[0.42, 0.34, 0.27, 0.22], WHITE_HALF=0.045,
-                   METER_TIMEOUT=2.5, FINISH_SMASHES=3.5),
+                   METER_TIMEOUT=2.5, FINISH_SMASHES=3.5,
+                   POGS_BOT_SPREAD=0.05, POGS_SWEEP_MUL=0.8, POGS_BOT_HIT=0.97),
 }
-DIFFICULTY = "NORMAL"
+#    POGS_BOT_SPREAD  how wrong the bot's meter aim is in Pogs (smaller = better bot)
+#    POGS_SWEEP_MUL   Pogs meter speed (smaller = faster = harder)
+#    POGS_BOT_HIT     how often the bot hits its click-circles in Pogs
+DIFFICULTY = "MEDIUM"
+POGS_BOT_SPREAD, POGS_SWEEP_MUL, POGS_BOT_HIT = 0.11, 1.0, 0.88
 
 
 def set_difficulty(name):
     global DIFFICULTY, BOT_SPREAD, SWEEP_TIMES, WHITE_HALF, METER_TIMEOUT, FINISH_SMASHES, FINISH_DIST
+    global POGS_BOT_SPREAD, POGS_SWEEP_MUL, POGS_BOT_HIT
     DIFFICULTY = name
     d = DIFFICULTIES[name]
     BOT_SPREAD, SWEEP_TIMES, WHITE_HALF = d["BOT_SPREAD"], d["SWEEP_TIMES"], d["WHITE_HALF"]
     METER_TIMEOUT, FINISH_SMASHES = d["METER_TIMEOUT"], d["FINISH_SMASHES"]
     FINISH_DIST = int(MAX_DIST * FINISH_SMASHES)
-
-
-def cycle_difficulty():
-    names = list(DIFFICULTIES)
-    set_difficulty(names[(names.index(DIFFICULTY) + 1) % len(names)])
+    POGS_BOT_SPREAD, POGS_SWEEP_MUL, POGS_BOT_HIT = d["POGS_BOT_SPREAD"], d["POGS_SWEEP_MUL"], d["POGS_BOT_HIT"]
 
 
 set_difficulty(DIFFICULTY)
@@ -1668,9 +1687,9 @@ class PogsGame:
         self.t = 0.0
 
     def start_meter(self):
-        sweep = max(0.22, 0.70 - 0.09 * (self.round - 1))     # much faster, and faster every round
+        sweep = max(0.22, 0.70 - 0.09 * (self.round - 1)) * POGS_SWEEP_MUL     # much faster, and faster every round
         self.meter = Meter(sweep)
-        self.bot_target = clamp(random.gauss(0.84, 0.11), 0.05, 1.0)
+        self.bot_target = clamp(random.gauss(0.84, POGS_BOT_SPREAD), 0.05, 1.0)
         self.bot_wait = random.uniform(0.8, 3.0)
         self.impacted = False
         self.msg = self.msg2 = ""
@@ -1836,7 +1855,7 @@ class PogsGame:
     def start_targets(self):
         n = min(5, 2 + (self.round + 1) // 2)                           # more circles in later rounds
         life = max(0.6, 1.25 - 0.09 * (self.round - 1))                 # and less time for each one
-        p_hit = clamp(0.88 - 0.03 * (self.round - 1), 0.6, 0.88)        # how well the bot clicks
+        p_hit = clamp(POGS_BOT_HIT - 0.03 * (self.round - 1), 0.45, 0.99)        # how well the bot clicks
         self.targets = []
         prev = None
         for i in range(n):
@@ -2306,33 +2325,197 @@ def draw_exit(mouse, bg=None):
     button(EXIT_NO, "NO", EXIT_NO.collidepoint(mouse), SMALL_FONT)
 
 
-def draw_card(rect, img, title, start_rect, mouse):
-    """a game-mode card that lifts up when the mouse is over it"""
-    lift = -10 if (rect.collidepoint(mouse) or start_rect.collidepoint(mouse)) else 0
-    r = rect.move(0, lift)
-    panel(r.move(8, 10), (0, 0, 0, 70), radius=20)
-    pygame.draw.rect(WIN, (139, 90, 43), r, border_radius=20)
-    pygame.draw.rect(WIN, BROWN, r, 3, border_radius=20)
-    panel(r.inflate(-16, -16), BEIGE, radius=14)
-    WIN.blit(img, img.get_rect(center=(r.centerx, r.y + CARD_IMG_H // 2 + 30)))
-    text_center(MID_FONT, title, BROWN, (r.centerx, r.bottom - 90))
-    button(start_rect, "START", start_rect.collidepoint(mouse), MID_FONT, lift)
+# ---------------------------------------------------------------------
+#  GAME MODE SCREENS
+# ---------------------------------------------------------------------
+NOTICE = ["", 0.0]              # little pop-up message: [text, seconds left]
+SELECTED_MODE = "karera"        # which game card is selected on the 2nd screen
+DIFF_CHOSEN = False             # the player must pick a level before pressing START
+_CARD_CACHE = {}
+_WRAP = {}
+
+MODE_INFO = {
+    "karera": ("DAMPA KARERA", KARERA_IMG, "Gameplay - Dampa Rubber Band",
+               "Players compete in a rubber band racing game where the goal is to reach the finish line "
+               "first. The game consists of 4 rounds, with each round becoming faster and more "
+               "challenging. Players must use good timing and strategy to move their rubber bands "
+               "forward and beat their opponents. The first player to cross the finish line wins the round!"),
+    "pogs": ("DAMPA POGS", POGS_IMG, "Gameplay - Dampa Pogs",
+             "Players control a dampa to smash a stack of pogs using a strength meter. By pressing SPACE "
+             "at the right moment, players control the power of their smash. The goal is to flip as many "
+             "pogs as possible to win the game. Players must use the right timing and strength to "
+             "achieve the highest score and defeat their opponents."),
+}
 
 
-def draw_gamemodes(mouse):
+def set_notice(text):
+    NOTICE[0], NOTICE[1] = text, 1.8
+
+
+def draw_notice(center, color=(255, 210, 60)):
+    if NOTICE[1] > 0:
+        k = ease_out(clamp((1.8 - NOTICE[1]) / 0.2))
+        pop_text(MID_FONT, NOTICE[0], color, center, k, alpha=int(255 * clamp(NOTICE[1] / 0.4)))
+
+
+def wrap_text(font, text, width):
+    lines, cur = [], ""
+    for word in text.split():
+        t = (cur + " " + word).strip()
+        if font.render(t, True, WHITE).get_width() <= width:
+            cur = t
+        else:
+            lines.append(cur)
+            cur = word
+    if cur:
+        lines.append(cur)
+    return lines
+
+
+def person_icon(color=(70, 35, 30)):
+    """a chunky pixel silhouette of a person"""
+    s = pygame.Surface((24, 32), pygame.SRCALPHA)
+    pygame.draw.circle(s, color, (12, 6), 6)
+    pygame.draw.rect(s, color, (3, 14, 18, 18), border_radius=3)
+    for gx, gy, gh in ((6, 16, 10), (17, 16, 10), (11, 24, 8)):      # gaps = arms and legs
+        pygame.draw.rect(s, (0, 0, 0, 0), (gx, gy, 1 + (gx == 11), gh))
+    return pygame.transform.scale(s, (24 * 6, 32 * 6))
+
+
+# Put your exact file names FIRST in each list. Names are matched ignoring upper/lower case.
+# The game looks in the same folder as main.py.
+VS_FILES = {
+    "PLAYER VS PLAYER": ["2playermode.png", "2players.png", "pvp.png", "playervsplayer.png", "player_vs_player.png"],
+    "PLAYER VS BOT":    ["botvsplayermode.png", "playervsbot.png", "pvb.png", "player_vs_bot.png", "bot_vs_player.png"],
+}
+
+
+def find_file(names):
+    """case-insensitive search for the first existing file in `names`"""
+    try:
+        have = {f.lower(): f for f in os.listdir(".")}
+    except OSError:
+        return None
+    for n in names:
+        if n.lower() in have:
+            return have[n.lower()]
+    return None
+
+
+def vs_card_surface(title, sub):
+    key = ("vs", title)
+    if key in _CARD_CACHE:
+        return _CARD_CACHE[key]
+    fname = find_file(VS_FILES.get(title, []))
+    if fname:
+        pic = load_image(fname)
+        if pic is not None:
+            pic = crop_to_content(pic)
+            k = min(VS_W / pic.get_width(), VS_H / pic.get_height())      # keep the picture's shape
+            size = (int(pic.get_width() * k), int(pic.get_height() * k))
+            pic = pygame.transform.scale(pic, size)                       # hard pixels
+            base = pygame.Surface((VS_W, VS_H), pygame.SRCALPHA)
+            base.blit(pic, pic.get_rect(center=(VS_W // 2, VS_H // 2)))
+            print(f"[dampa] card '{title}': using {fname}")
+            _CARD_CACHE[key] = base
+            return base
+    print(f"[dampa] card '{title}': picture NOT found, PNG files here: "
+          f"{[f for f in os.listdir('.') if f.lower().endswith('.png')]}")
+    base = pixel_box(VS_W, VS_H, (86, 36, 30), (250, 222, 206), (255, 240, 230), (214, 160, 148)).copy()
+    text_center(MID_FONT, title, BROWN, (VS_W // 2, 62), base)
+    icon = person_icon()
+    cy = 215
+    base.blit(icon, icon.get_rect(center=(VS_W // 2 - 125, cy)))
+    base.blit(icon, icon.get_rect(center=(VS_W // 2 + 125, cy)))
+    text_center(BIG_FONT, "VS", BROWN, (VS_W // 2, cy - 8), base)
+    _CARD_CACHE[key] = base
+    return base
+
+
+def draw_vs_select(mouse):
+    """SCREEN 1: PLAYER VS PLAYER or PLAYER VS BOT"""
+    WIN.blit(BG_BLUR, (0, 0))
+    AMBIENT.draw(WIN)
+    button(MODE_HEADER, "PICK A MODE", False, BIG_FONT, key="pickheader")   # gold sign like the reference
+
+    for rect, title, sub in ((VS_PVP, "PLAYER VS PLAYER", "play with a friend"),
+                             (VS_PVB, "PLAYER VS BOT", "play against the bot")):
+        a = hover_amt(("vs", title), rect.collidepoint(mouse))
+        s = 1.0 + 0.07 * a
+        base = vs_card_surface(title, sub)
+        size = (int(rect.w * s), int(rect.h * s))
+        img = pygame.transform.scale(base, size)
+        r = img.get_rect(center=rect.center)
+        sk = ("vsshadow", title)
+        if sk not in _CARD_CACHE:
+            _CARD_CACHE[sk] = silhouette(base, 80)                        # shadow follows the card's shape
+        WIN.blit(pygame.transform.scale(_CARD_CACHE[sk], size), r.move(8, 10))
+        WIN.blit(img, r)
+
+    draw_notice((WIDTH // 2, VS_Y + VS_H + 38))
+    button(VS_BACK, "BACK", VS_BACK.collidepoint(mouse), MID_FONT)
+
+
+def mode_card_surface(key):
+    ck = ("mode", key)
+    if ck not in _CARD_CACHE:
+        title, img = MODE_INFO[key][0], MODE_INFO[key][1]
+        base = pygame.Surface((CARD_W, CARD_H), pygame.SRCALPHA)
+        pygame.draw.rect(base, (139, 90, 43), base.get_rect(), border_radius=20)
+        pygame.draw.rect(base, BROWN, base.get_rect(), 3, border_radius=20)
+        panel(pygame.Rect(8, 8, CARD_W - 16, CARD_H - 16), BEIGE, base, 14)
+        base.blit(img, ((CARD_W - CARD_IMG_W) // 2, 18))
+        text_center(MID_FONT, title, BROWN, (CARD_W // 2, 395), base)
+        _CARD_CACHE[ck] = base
+    return _CARD_CACHE[ck]
+
+
+def draw_mode_select(mouse):
+    """SCREEN 2: pick Karera or Pogs (click a card = description changes), pick the level, press START"""
     WIN.blit(BG_BLUR, (0, 0))
     AMBIENT.draw(WIN)
 
-    panel(MODE_HEADER, (232, 206, 160, 200), radius=16)
-    text_center(BIG_FONT, "PICK A GAME!", BROWN, MODE_HEADER.center)
+    # ---- the two cards: selected one is bigger, the one under the mouse grows too
+    for key, rect in (("karera", CARD1_RECT), ("pogs", CARD2_RECT)):
+        hov = rect.collidepoint(mouse) or (MODE1_START if key == "karera" else MODE2_START).collidepoint(mouse)
+        a = hover_amt(("mode", key), hov)
+        sa = hover_amt(("modesel", key), SELECTED_MODE == key)
+        s = 1.0 + 0.05 * sa + 0.05 * a
+        base = mode_card_surface(key)
+        img = pygame.transform.scale(base, (int(CARD_W * s), int(CARD_H * s)))
+        r = img.get_rect(center=rect.center)
+        panel(r.move(8, 10), (0, 0, 0, 70), radius=20)
+        WIN.blit(img, r)
+        if SELECTED_MODE == key:
+            pygame.draw.rect(WIN, WHITE, r.inflate(6, 6), 3, border_radius=22)
+        sr = pygame.Rect(0, 0, int(MODE_START_W * s), int(MODE_START_H * s))
+        sr.center = (r.centerx, r.centery + int(START_DY * s))
+        button(sr, "START", sr.collidepoint(mouse), MID_FONT, key=("start", key))
 
-    draw_card(CARD1_RECT, KARERA_IMG, "DAMPA KARERA", MODE1_START, mouse)
-    draw_card(CARD2_RECT, POGS_IMG, "DAMPA POGS", MODE2_START, mouse)
+    # ---- info panel (changes with the selected card)
+    panel(INFO_PANEL, (0, 0, 0, 120), radius=18)
+    title, _, sub, desc = MODE_INFO[SELECTED_MODE]
+    t_img = TITLE_FONT.render(title, True, GOLD)
+    WIN.blit(TITLE_FONT.render(title, True, (0, 0, 0)), (INFO_X + 3, INFO_PANEL.y + 23))
+    WIN.blit(t_img, (INFO_X, INFO_PANEL.y + 20))
+    y = INFO_PANEL.y + 82
+    WIN.blit(DESC_FONT.render(sub, True, GOLD), (INFO_X, y))
+    y += 28
+    if SELECTED_MODE not in _WRAP:
+        _WRAP[SELECTED_MODE] = wrap_text(DESC_FONT, desc, INFO_PANEL.w - 50)
+    for line in _WRAP[SELECTED_MODE]:
+        WIN.blit(DESC_FONT.render(line, True, WHITE), (INFO_X, y))
+        y += 22
 
-    button(DIFF_BTN, f"KARERA LEVEL: {DIFFICULTY}", DIFF_BTN.collidepoint(mouse),
-           SMALL_FONT, 0, DIFF_PAL[DIFFICULTY])      # green / blue / red
+    # ---- level (the player must choose one)
+    if NOTICE[1] > 0:
+        draw_notice((INFO_X + 170, 385), (255, 110, 90))
+    else:
+        text_center(MID_FONT, "LEVEL DIFFICULTY", GOLD, (INFO_X + 135, 385), shadow=True)
+    for name, r in LEVEL_RECTS.items():
+        selected = DIFF_CHOSEN and DIFFICULTY == name
+        button(r, name, r.collidepoint(mouse) or selected, MID_FONT)
 
-    # ===== BACK BUTTON =====
     button(MODE_BACK, "BACK", MODE_BACK.collidepoint(mouse), MID_FONT)
 
 
@@ -2380,7 +2563,7 @@ def scroll_scores(dy):
 #  MAIN LOOP
 # =====================================================================
 def main():
-    global scroll_offset
+    global scroll_offset, SELECTED_MODE, DIFF_CHOSEN
     screen = "menu"          # "menu" | "score" | "exit" | "gamemodes" | "game"
     prev_screen = screen
     game = None
@@ -2395,6 +2578,8 @@ def main():
     while run:
         dt = min(CLOCK.tick(60) / 1000.0, 0.05)
         FX_DT[0] = dt
+        if NOTICE[1] > 0:
+            NOTICE[1] = max(0.0, NOTICE[1] - dt)
         mouse = pygame.mouse.get_pos()
         AMBIENT.update(dt)
         update_confetti(dt)
@@ -2459,7 +2644,12 @@ def main():
 
             # ---------------- OTHER SCREENS ----------------
             if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                screen = "exit" if screen == "menu" else "menu"
+                if screen == "menu":
+                    screen = "exit"
+                elif screen == "botmodes":
+                    screen = "gamemodes"          # one step back
+                else:
+                    screen = "menu"
 
             if screen == "score" and event.type == pygame.MOUSEWHEEL:
                 scroll_scores(event.y)
@@ -2478,22 +2668,50 @@ def main():
                         play("click")
                         screen = "exit"
                 elif screen == "gamemodes":
-                    if MODE1_START.collidepoint(pos):
+                    if VS_PVP.collidepoint(pos):
+                        play("miss")
+                        set_notice("PLAYER VS PLAYER: COMING SOON!")
+                    elif VS_PVB.collidepoint(pos):
                         play("click")
-                        game = Game()
-                        paused = False
-                        screen = "game"
-                    elif MODE2_START.collidepoint(pos):
-                        play("click")
-                        game = PogsGame(add_result)
-                        paused = False
-                        screen = "game"
-                    elif DIFF_BTN.collidepoint(pos):
-                        play("click")
-                        cycle_difficulty()
-                    elif MODE_BACK.collidepoint(pos):
+                        DIFF_CHOSEN = False                    # pick the level again every time
+                        NOTICE[1] = 0.0
+                        screen = "botmodes"
+                    elif VS_BACK.collidepoint(pos):
                         play("click")
                         screen = "menu"
+                elif screen == "botmodes":
+                    handled = False
+                    for key, crect, srect in (("karera", CARD1_RECT, MODE1_START),
+                                              ("pogs", CARD2_RECT, MODE2_START)):
+                        if srect.inflate(30, 30).collidepoint(pos):          # START button
+                            SELECTED_MODE = key
+                            handled = True
+                            if DIFF_CHOSEN:
+                                play("click")
+                                game = Game() if key == "karera" else PogsGame(add_result)
+                                paused = False
+                                screen = "game"
+                            else:
+                                play("miss")
+                                set_notice("PICK A LEVEL FIRST!")
+                            break
+                        if crect.inflate(20, 20).collidepoint(pos):          # card = show its description
+                            play("click")
+                            SELECTED_MODE = key
+                            handled = True
+                            break
+                    if not handled:
+                        for name, r in LEVEL_RECTS.items():
+                            if r.collidepoint(pos):
+                                play("click")
+                                set_difficulty(name)
+                                DIFF_CHOSEN = True
+                                NOTICE[1] = 0.0
+                                handled = True
+                                break
+                    if not handled and MODE_BACK.collidepoint(pos):
+                        play("click")
+                        screen = "gamemodes"
                 elif screen == "score":
                     if SCORE_BACK.collidepoint(pos):
                         play("click")
@@ -2509,6 +2727,7 @@ def main():
         if screen != prev_screen:
             fade = 1.0
             CONFETTI.clear()
+            NOTICE[1] = 0.0
             prev_screen = screen
 
         if screen == "menu":
@@ -2518,7 +2737,9 @@ def main():
         elif screen == "exit":
             draw_exit(mouse)
         elif screen == "gamemodes":
-            draw_gamemodes(mouse)
+            draw_vs_select(mouse)
+        elif screen == "botmodes":
+            draw_mode_select(mouse)
         else:
             if paused:
                 draw_pause(mouse, pause_view, snapshot)       # game is frozen: no update()
