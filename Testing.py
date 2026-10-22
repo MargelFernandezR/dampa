@@ -4,6 +4,8 @@ import json
 import os
 import random
 import math
+import io
+import base64
 from array import array
 
 try:
@@ -39,8 +41,7 @@ def play_bgm(track):
     except pygame.error as e:
         print(f"Could not load BGM '{track}':", e)
 
-# HOME PAGE BACKGROUND MUSIC (Start with menu music)
-play_bgm("menu")
+# HOME PAGE BACKGROUND MUSIC: starts when the opening intro is finished (see main())
 WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -96,6 +97,27 @@ def blur_surface(surf, k=14):
     """cheap strong blur: shrink the picture, then enlarge it smoothly"""
     small = pygame.transform.smoothscale(surf, (WIDTH // k, HEIGHT // k))
     return pygame.transform.smoothscale(small, (WIDTH, HEIGHT))
+
+
+# =====================================================================
+#  HIT RING  (the little ring when a "HIT!" circle is clicked in Dampa Pogs)
+#    waves [x, y, age, life, max_radius]
+# =====================================================================
+def fx_step(waves, dt):
+    for w in waves:
+        w[2] += dt
+    waves[:] = [w for w in waves if w[2] < w[3]]
+
+
+def draw_waves(layer, waves):
+    for x, y, age, life, maxr in waves:
+        if age < 0:
+            continue
+        k = age / life
+        r = int(15 + maxr * ease_out(k))
+        pygame.draw.circle(layer, (255, 255, 255, int(190 * (1 - k))), (int(x), int(y)), r, 4)
+
+
 
 
 # =====================================================================
@@ -438,6 +460,7 @@ FLOOR = make_floor()
 FLOOR_FLIP = pygame.transform.flip(FLOOR, False, True)   # flipped copy so repeats line up
 HANDS_TOP_IMG, HANDS_ARMS_IMG = make_hands()
 HANDS_TOP_SHADOW = silhouette(HANDS_TOP_IMG, 80)
+HANDS_ARMS_SHADOW = silhouette(HANDS_ARMS_IMG, 80)       # NEW: forearm shadow (was missing, so the shadow got cut off)
 HANDS_H = HANDS_TOP_IMG.get_height() + HANDS_ARMS_IMG.get_height()
 HANDS_TOP = HEIGHT + 10 - HANDS_H      # the arms end just below the bottom edge of the screen
 BANDS = make_bands()
@@ -556,6 +579,7 @@ UI_FILES = {
     # in-game menu
     "pause_panel":   "board2.png",     # paper panel (no buttons)
     "hamburger":     "hamburger.png",       # the menu icon button
+    "logo_frame":    "buttonsize1.png",      # optional: empty frame for the level logo (only used if LOGO_HAS_FRAME = False)
 }
 BTN_KEY = {"gold": "button", "green": "easy", "blue": "normal", "red": "hard"}
 _UI_RAW = {}
@@ -786,6 +810,29 @@ def hud_box(target, rect, color=HUD_COLOR):
     pygame.draw.rect(target, (60, 25, 5), rect, 3, border_radius=10)
 
 
+def hud_pill(target, rect, text="", font=None):
+    """gold pill (your button.png) with dark text - used for the whole in-game HUD"""
+    font = font or SMALL_FONT
+    img = ui_img("button", rect.size)
+    if img is None:
+        img = btn_surface(rect.w, rect.h, "gold")
+    target.blit(img, img.get_rect(center=rect.center))
+    if text:
+        text_center(font, text, BTN_PAL["gold"][0], rect.center, target)
+
+
+# in-game HUD layout (from the reference images)
+HUD_ROUND   = pygame.Rect(WIDTH // 2 - 190, 10, 380, 84)      # big ROUND pill
+HUD_TIMER   = pygame.Rect(0, 0, 150, 36)
+HUD_TIMER.midtop = (WIDTH // 2, 106)                          # the pink-circle spot (timer)
+HUD_L_LABEL = pygame.Rect(WIDTH // 2 - 395, 12, 185, 38)
+HUD_L_VALUE = pygame.Rect(WIDTH // 2 - 395, 58, 185, 38)
+HUD_R_LABEL = pygame.Rect(WIDTH // 2 + 210, 12, 185, 38)
+HUD_R_VALUE = pygame.Rect(WIDTH // 2 + 210, 58, 185, 38)
+HUD_SIDE_L  = [pygame.Rect(12, 165, 185, 40), pygame.Rect(12, 220, 185, 40)]
+HUD_SIDE_R  = [pygame.Rect(WIDTH - 197, 165, 185, 40), pygame.Rect(WIDTH - 197, 220, 185, 40)]
+
+
 #  MENU / SCORE / EXIT LAYOUT
 
 BTN_W, BTN_H, GAP = 340, 72, 18
@@ -861,7 +908,7 @@ EXIT_NO = pygame.Rect(0, 0, _btn_w, _btn_h)
 EXIT_NO.center = (EXIT_PANEL.centerx, EXIT_YES.centery + _btn_h + 14)
 
 # in-game pause menu
-PAUSE_BTN = pygame.Rect(WIDTH - 72, 14, 54, 44)          # the hamburger button
+PAUSE_BTN = pygame.Rect(WIDTH - 84, 12, 66, 62)          # the hamburger button (bigger, like the reference)
 PAUSE_PANEL = pygame.Rect(WIDTH // 2 - 190, 140, 380, 420)
 PAUSE_BUTTONS = {name: pygame.Rect(WIDTH // 2 - 150, 192 + i * 84, 300, 64)
                  for i, name in enumerate(("CONTINUE", "SCORE", "MENU", "EXIT"))}
@@ -899,6 +946,9 @@ INFO_PANEL = pygame.Rect(740, 80, 520, 520)
 INFO_X = INFO_PANEL.x + 24
 LEVEL_NAMES = ("EASY", "MEDIUM", "HARD")
 LEVEL_RECTS = {name: pygame.Rect(INFO_X + 10, 420 + i * 60, 240, 50) for i, name in enumerate(LEVEL_NAMES)}
+LOGO_FRAME = pygame.Rect(1055, 400, 150, 205)     # spot (right of the level buttons) that shows the level logo
+LOGO_HAS_FRAME = True     # True = your level pictures already include the brown border + yellow background
+                          # False = the game draws the yellow frame itself and puts the logo inside
 MODE_BACK = pygame.Rect(INFO_PANEL.right - 190, 618, 170, 54)
 
 
@@ -975,7 +1025,13 @@ METER_W, METER_H, METER_Y = 260, 12, 610
 METER_MASK = pygame.Surface((METER_W, METER_H), pygame.SRCALPHA)
 pygame.draw.rect(METER_MASK, (255, 255, 255, 255), METER_MASK.get_rect(), border_radius=6)
 
-T_IMPACT = 0.25                      # moment the hands hit the floor (seconds after smash starts)
+# hand slam timing (copied from the reference video): the hands sit still, then GROW toward the
+# camera (slow start -> fast middle -> soft landing), hold for a moment at the bands, then snap back.
+T_GROW0 = 0.12                       # hands start moving (seconds after smash starts)
+T_IMPACT = 0.55                      # moment the hands hit the bands (end of the grow)
+T_HOLD = 0.12                        # hands stay pressed down for this long
+T_SNAP = 0.06                        # then snap back to the resting size this fast
+STRIKE_MIN, STRIKE_FULL_TIP = 1.20, 300   # weak smash = x1.2 bigger, perfect smash reaches y=300
 BAND_TIME = 1.4                      # how long the bands take to slide up
 
 HUD_LEFT = pygame.Rect(266, 20, 176, 54)
@@ -1220,8 +1276,14 @@ class Game:
         return "tie"
 
     # ------------------------------------------------------------ drawing
+    def peak_scale(self, side):
+        """how big the hands get at the moment of impact (stronger meter = closer to the camera)"""
+        full = clamp((HANDS_TOP + HANDS_H - STRIKE_FULL_TIP) / HANDS_H, 1.25, 1.45)
+        return lerp(STRIKE_MIN, full, side.power)
+
     def hand_pose(self, side):
-        """returns (y_offset, scale, x_jitter) for the hands"""
+        """returns (y_offset, scale, x_jitter). The whole hands+arms picture is scaled up from the
+        bottom edge of the screen, so the fingertips travel up while the arms stay planted."""
         st = self.smash_t
         if st is None:
             jitter = 0
@@ -1231,15 +1293,17 @@ class Game:
             elif self.phase in ("meter", "lock"):     # gentle idle bob so the hands feel alive
                 bob = 3 * math.sin(self.t * 6)
             return bob, 1.0, jitter
-        strike = 45 + 50 * side.power                 # stronger meter = bigger smash
-        if st < 0.15:                                 # wind-up (hands pull back)
-            return 25 * ease_out(st / 0.15), 1.0, 0
-        if st < T_IMPACT:                             # strike
-            k = (st - 0.15) / (T_IMPACT - 0.15)
-            return 25 - (25 + strike) * k, 1.0 - 0.10 * k, 0
-        if st < 0.65:                                 # recover
-            k = ease_in_out((st - T_IMPACT) / (0.65 - T_IMPACT))
-            return -strike * (1 - k), 0.90 + 0.10 * k, 0
+        peak = self.peak_scale(side)
+        if st < T_GROW0:                              # still
+            return 0, 1.0, 0
+        if st < T_IMPACT:                             # rush toward the bands
+            k = (st - T_GROW0) / (T_IMPACT - T_GROW0)
+            return 0, lerp(1.0, peak, ease_in_out(k)), 0
+        if st < T_IMPACT + T_HOLD:                    # pressed down (tiny tremble)
+            return 0, peak, random.uniform(-1.5, 1.5)
+        if st < T_IMPACT + T_HOLD + T_SNAP:           # snap back
+            k = (st - T_IMPACT - T_HOLD) / T_SNAP
+            return 0, lerp(peak, 1.0, ease_out(k)), 0
         return 0, 1.0, 0
 
     def travel(self, side):
@@ -1332,31 +1396,28 @@ class Game:
         if st is not None and st > T_IMPACT + BAND_TIME and side.base + side.dist >= FINISH_DIST:
             text_center(BIG_FONT, "FINISHED!", GOLD, (cx, 125), surf, shadow=True)
 
-        # hands + arms (the forearms stretch a little during the smash so they always reach the bottom)
+        # hands + arms: the picture grows from the bottom edge (arms stay planted, fingertips rush up)
         off, sc, jx = self.hand_pose(side)
         hw = int(HANDS_TOP_IMG.get_width() * sc)
         hh = int(HANDS_TOP_IMG.get_height() * sc)
         top = HANDS_TOP_IMG if sc == 1.0 else pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh))
         shad = HANDS_TOP_SHADOW if sc == 1.0 else pygame.transform.smoothscale(HANDS_TOP_SHADOW, (hw, hh))
-        y = HANDS_TOP + off
+        y = HANDS_TOP + HANDS_H - HANDS_H * sc + off
         wrist_y = int(y + hh - 1)
         arm_h = max(int(HANDS_ARMS_IMG.get_height() * sc), HEIGHT + 8 - wrist_y)
         if (hw, arm_h) == HANDS_ARMS_IMG.get_size():
             arms = HANDS_ARMS_IMG
         else:
             arms = pygame.transform.smoothscale(HANDS_ARMS_IMG, (hw, arm_h))
+        if (hw, arm_h) == HANDS_ARMS_SHADOW.get_size():
+            arm_shad = HANDS_ARMS_SHADOW
+        else:
+            arm_shad = pygame.transform.smoothscale(HANDS_ARMS_SHADOW, (hw, arm_h))
         hx = int(cx + jx - hw // 2)
-        surf.blit(shad, (hx + 14, int(y) + 10))                  # soft drop shadow on the floor
+        surf.blit(arm_shad, (hx + 14, wrist_y + 10))             # forearm shadow (no longer cut off)
+        surf.blit(shad, (hx + 14, int(y) + 10))                  # hands shadow
         surf.blit(arms, (hx, wrist_y))
         surf.blit(top, (hx, int(y)))
-
-        # impact ring
-        if st is not None and T_IMPACT <= st < T_IMPACT + 0.35:
-            k = (st - T_IMPACT) / 0.35
-            r = int(15 + 70 * k)
-            ring = pygame.Surface((r * 2 + 6, r * 2 + 6), pygame.SRCALPHA)
-            pygame.draw.circle(ring, (255, 255, 255, int(200 * (1 - k))), (r + 3, r + 3), r, 4)
-            surf.blit(ring, ring.get_rect(center=(cx, HANDS_TOP - 60)))
 
         self.draw_meter(surf, side, cx, is_player)
 
@@ -1385,33 +1446,21 @@ class Game:
             WIN.blit(surf, (ox + sx, sy))
         pygame.draw.line(WIN, (15, 15, 15), (HALF, 0), (HALF, HEIGHT), 3)
 
-        # ===== ROUND WINS LABELS (3px gap lang) =====
+        # ===== NEW HUD (gold pills, same layout as the reference image) =====
+        n = min(self.round, ROUNDS)
+        # left = BOT, right = PLAYER
+        hud_pill(WIN, HUD_L_LABEL, "ROUND WINS")
+        hud_pill(WIN, pygame.Rect(HUD_L_VALUE.right - 140, HUD_L_VALUE.y, 140, 34), f"SCORE:{self.bot_wins}")
+        hud_pill(WIN, HUD_ROUND, f"ROUND {n}", TITLE_FONT)
+        hud_pill(WIN, HUD_R_LABEL, "ROUND WINS")
+        hud_pill(WIN, pygame.Rect(HUD_R_VALUE.x, HUD_R_VALUE.y, 140, 34), f"SCORE:{self.player_wins}")
 
-        # ---- LEFT SIDE (BOT) ----
-        bot_label = pygame.Rect(WIDTH // 2 - 273, 10, 140, 30)
-        hud_box(WIN, bot_label)
-        text_center(SMALL_FONT, "ROUND WINS", TEXT_COLOR, bot_label.center, shadow=True)
-
-        bot_score = pygame.Rect(WIDTH // 2 - 223, 45, 90, 45)
-        hud_box(WIN, bot_score)
-        text_center(BIG_FONT, str(self.bot_wins), TEXT_COLOR, bot_score.center, shadow=True)
-
-        # ---- CENTER ----
-        center_box = pygame.Rect(WIDTH // 2 - 130, 10, 260, 80)
-        hud_box(WIN, center_box)
-        text_center(BIG_FONT, f"ROUND {min(self.round, ROUNDS)}", TEXT_COLOR,
-                    (center_box.centerx, center_box.y + 28), shadow=True)
-        text_center(DESC_FONT, self.hud_message(), TEXT_COLOR,
-                    (center_box.centerx, center_box.y + 58), shadow=True)
-
-        # ---- RIGHT SIDE (PLAYER) ----
-        player_label = pygame.Rect(WIDTH // 2 + 133, 10, 140, 30)
-        hud_box(WIN, player_label)
-        text_center(SMALL_FONT, "ROUND WINS", TEXT_COLOR, player_label.center, shadow=True)
-
-        player_score = pygame.Rect(WIDTH // 2 + 133, 45, 90, 45)
-        hud_box(WIN, player_score)
-        text_center(BIG_FONT, str(self.player_wins), TEXT_COLOR, player_score.center, shadow=True)
+        # timer pill (the pink-circle spot under the ROUND pill)
+        timer_txt = ""
+        if self.phase == "meter" and not self.player.locked:
+            timer_txt = f"TIME: {int(math.ceil(max(0.0, METER_TIMEOUT - self.t)))}"
+        hud_pill(WIN, HUD_TIMER, timer_txt)
+        text_center(SMALL_FONT, self.hud_message(), TEXT_COLOR, (WIDTH // 2, 172), shadow=True)
 
         # ---- friendly pop-up messages ----
         if self.phase == "meter" and self.turn == 1 and self.t < 1.0:
@@ -1453,8 +1502,12 @@ TURN_TIME = 5.0                     # seconds each player has to stop the meter
 POG_D = 72                          # pog size on screen (px)
 POG_FILES = ["pog1.png", "pog2.png", "pog3.png", "pog4.png"]   # every pog in the stack gets one of these
 
-POGS_T_IMPACT = 0.30                # moment the hands hit the floor (smash phase)
-SMASH_TIME = 0.85
+# hand slam timing (same shape as the reference video: still -> grow toward the camera -> hold -> snap back)
+POGS_T_GROW0 = 0.12                 # hands start moving (smash phase)
+POGS_T_IMPACT = 0.55                # moment the hands hit the pogs (end of the grow)
+POGS_T_HOLD = 0.12                  # hands stay pressed down
+POGS_T_SNAP = 0.06                  # then snap back to the resting size
+SMASH_TIME = 0.95
 LOCK_TIME = 0.55
 FLIGHT_TIME = 1.7                   # how long the flipped pogs take to scatter
 COLLECT_TIME = 0.75
@@ -1462,7 +1515,7 @@ TRANS_TIME = 1.5                    # turn-change transition
 HIDE = 430                          # how far the hands slide down when hidden
 REST_TOP = 430                      # y of the fingertips when resting
 HAND_W = 280
-HAND_X = {"player": CX - 95, "bot": CX + 95}
+HAND_X = {"player": CX, "bot": CX}  # both hands sit in the middle-bottom
 
 IDEAL_LO, IDEAL_HI = 0.80, 0.90     # the "sweet spot" of the power meter
 
@@ -1702,8 +1755,7 @@ class PogsGame:
         self.turn = "player"            # the player always starts
         self.prev = None
         self.flying = []
-        self.smoke = []
-        self.waves = []
+        self.waves = []          # only the little ring when a "HIT!" circle is clicked
         self.shake = 0.0
         self.power = 0.0
         self.msg = ""
@@ -1851,26 +1903,14 @@ class PogsGame:
                 "turns": random.choice((3, 5, 7)),             # odd number of half turns = lands flipped
             })
 
-        # smoke + shock waves at the hands
-        hx, hy = HAND_X[self.turn], REST_TOP - 30
-        for _ in range(int(10 + 22 * p)):
-            a = random.uniform(0, math.tau)
-            s = random.uniform(30, 130) * (0.5 + p)
-            self.smoke.append([hx + random.uniform(-40, 40), hy + random.uniform(-10, 20),
-                               math.cos(a) * s, math.sin(a) * s * 0.6 - 25,
-                               random.uniform(10, 22), 0.0, random.uniform(0.6, 1.0)])
-        self.waves.append([hx, hy, 0.0, 0.55, 240 * (0.5 + p)])
-        self.waves.append([hx, hy, -0.12, 0.55, 170 * (0.5 + p)])
-        self.waves.append([CX, CY, 0.05, 0.45, 110 * (0.5 + p)])
         self.shake = 4 + 9 * p
 
     # ---------------------------------------------------------- circle-click challenge
     def pick_target_pos(self, prev):
         """a random spot anywhere on screen that does not hide the HUD"""
-        avoid = [pygame.Rect(CX - 160, 10, 320, 90), pygame.Rect(20, 20, 190, 40),
-                 pygame.Rect(WIDTH - 210, 20, 190, 40), pygame.Rect(20, 250, 190, 136),
-                 pygame.Rect(WIDTH - 210, 250, 190, 136), pygame.Rect(190, 455, 240, 120),
-                 pygame.Rect(870, 455, 240, 120), pygame.Rect(CX - 250, 115, 500, 110),
+        avoid = [pygame.Rect(250, 8, 800, 160), pygame.Rect(0, 150, 215, 125),
+                 pygame.Rect(WIDTH - 215, 150, 215, 125), pygame.Rect(CX - 300, 150, 600, 140),
+                 pygame.Rect(290, 520, 260, 120), pygame.Rect(750, 520, 260, 120),
                  PAUSE_BTN.inflate(40, 40)]
         for _ in range(80):
             x = random.randint(TARGET_R + 40, WIDTH - TARGET_R - 40)
@@ -1979,21 +2019,18 @@ class PogsGame:
         for pp in self.popups:
             pp[4] += dt
         self.popups = [pp for pp in self.popups if pp[4] < 0.8]
-        for s in self.smoke:
-            s[0] += s[2] * dt
-            s[1] += s[3] * dt
-            s[2] *= 0.96
-            s[3] *= 0.96
-            s[5] += dt
-        self.smoke = [s for s in self.smoke if s[5] < s[6]]
-        for w in self.waves:
-            w[2] += dt
-        self.waves = [w for w in self.waves if w[2] < w[3]]
+        fx_step(self.waves, dt)
         self.shake = max(0.0, self.shake - dt * 28)
 
     # ---------------------------------------------------------- hands pose
+    def peak_scale(self, side):
+        """how big the hands get at the moment of impact (stronger meter = closer to the camera)"""
+        h = self.A["hands"][side].get_height()
+        full = clamp((h + 100) / h, 1.2, 1.45)             # fingertips end up ~100px above their rest spot
+        return lerp(1.15, full, self.power)
+
     def hand_state(self, side):
-        """returns (y_offset, scale, x_jitter)"""
+        """returns (y_offset, scale, x_jitter). In the smash the hands are scaled from their bottom edge."""
         ph = self.phase
         if ph == "transition":
             u = clamp(self.t / TRANS_TIME)
@@ -2012,17 +2049,18 @@ class PogsGame:
         if ph in ("target", "tresult"):
             return 4 * math.sin(self.t * 6), 1.0, 0
         if ph == "smash":
-            strike = 50 + 70 * self.power
             t = self.t
-            if t < 0.2:                                     # raise the hands
-                k = ease_out(t / 0.2)
-                return 22 * k, 1.0 + 0.10 * k, 0
-            if t < POGS_T_IMPACT:                           # SLAM
-                k = (t - 0.2) / (POGS_T_IMPACT - 0.2)
-                return 22 - (22 + strike) * k, 1.10 - 0.15 * k, 0
-            if t < 0.8:                                     # recover
-                k = ease_in_out((t - POGS_T_IMPACT) / (0.8 - POGS_T_IMPACT))
-                return -strike * (1 - k), 0.95 + 0.05 * k, 0
+            peak = self.peak_scale(side)
+            if t < POGS_T_GROW0:                            # still
+                return 0, 1.0, 0
+            if t < POGS_T_IMPACT:                           # rush toward the pogs (grows from the bottom edge)
+                k = (t - POGS_T_GROW0) / (POGS_T_IMPACT - POGS_T_GROW0)
+                return 0, lerp(1.0, peak, ease_in_out(k)), 0
+            if t < POGS_T_IMPACT + POGS_T_HOLD:             # pressed down (tiny tremble)
+                return 0, peak, random.uniform(-1.5, 1.5)
+            if t < POGS_T_IMPACT + POGS_T_HOLD + POGS_T_SNAP:     # snap back
+                k = (t - POGS_T_IMPACT - POGS_T_HOLD) / POGS_T_SNAP
+                return 0, lerp(peak, 1.0, ease_out(k)), 0
         return 0, 1.0, 0
 
     # ---------------------------------------------------------- drawing
@@ -2049,7 +2087,8 @@ class PogsGame:
             self.blit_pog(surf, self.A["fronts"][self.pile[i]], x, y)
 
     def draw_flying(self, surf):
-        coll = (70, 640) if self.turn == "player" else (WIDTH - 70, 640)
+        # BOT is on the left, PLAYER on the right (like the reference HUD)
+        coll = (WIDTH - 70, 640) if self.turn == "player" else (70, 640)
         for p in self.flying:
             sx, sy = p["start"]
             ex, ey = p["end"]
@@ -2076,18 +2115,7 @@ class PogsGame:
     def draw_fx(self, surf):
         fx = self.fx
         fx.fill((0, 0, 0, 0))
-        for w in self.waves:
-            age = w[2]
-            if age < 0:
-                continue
-            k = age / w[3]
-            r = int(15 + w[4] * ease_out(k))
-            pygame.draw.circle(fx, (255, 255, 255, int(190 * (1 - k))), (int(w[0]), int(w[1])), r, 4)
-        for s in self.smoke:
-            k = s[5] / s[6]
-            r = int(s[4] * (1 + 1.8 * k))
-            a = int(150 * (1 - k))
-            pygame.draw.circle(fx, (215, 215, 215, a), (int(s[0]), int(s[1])), r)
+        draw_waves(fx, self.waves)
         surf.blit(fx, (0, 0))
 
     def draw_hands(self, surf):
@@ -2101,7 +2129,8 @@ class PogsGame:
             if sc != 1.0:
                 img = pygame.transform.smoothscale(img, (w, h))
                 shad = pygame.transform.smoothscale(shad, (w, h))
-            px, py = int(HAND_X[side] + jx - w // 2), int(REST_TOP + off)
+            base_h = self.A["hands"][side].get_height()
+            px, py = int(HAND_X[side] + jx - w // 2), int(REST_TOP + off + base_h - h)   # bottom edge stays put
             surf.blit(shad, (px + 14, py + 12))               # soft drop shadow on the floor
             surf.blit(img, (px, py))
 
@@ -2126,77 +2155,72 @@ class PogsGame:
         surf.blit(img, r)
 
     def draw_bar(self, surf, x, y, label):
+        """power bar like the reference: red track + green power fill"""
         m = self.meter
-        w, h = 170, 22
-        # lightning icon
-        bolt = [(x - 12, y - 8), (x - 30, y + 14), (x - 20, y + 14), (x - 28, y + 34), (x - 4, y + 8), (x - 15, y + 8)]
-        pygame.draw.polygon(surf, (255, 205, 40), bolt)
-        pygame.draw.polygon(surf, (90, 60, 0), bolt, 2)
-        self.text(surf, self.f_small, label, (20, 20, 20), (x + w // 2, y - 12), shadow=False)
-        pygame.draw.rect(surf, (30, 30, 30), (x - 3, y - 3, w + 6, h + 6), border_radius=8)
-        pygame.draw.rect(surf, (120, 120, 120), (x, y, w, h), border_radius=6)
+        w, h = 230, 14
+        self.text(surf, self.f_mid, label, WHITE, (x + w // 2, y - 20))
+        pygame.draw.rect(surf, (0, 0, 0), (x - 3, y - 3, w + 6, h + 6))
+        pygame.draw.rect(surf, (240, 60, 40), (x, y, w, h))                 # red track
         fill = int(w * clamp(m.pos))
         if fill > 0:
-            col = (255, 90, 40) if m.pos > 0.95 else (255, 205, 40)
-            pygame.draw.rect(surf, col, (x, y, fill, h), border_radius=6)
+            col = (255, 150, 40) if m.pos > 0.95 else (60, 230, 50)         # green power fill
+            pygame.draw.rect(surf, col, (x, y, fill, h))
         # the sweet spot (80-90%) - blinks while the player is aiming
         blink = not (self.turn == "player" and self.phase == "meter" and int(self.t * 5) % 2 == 0)
-        pygame.draw.rect(surf, (90, 255, 130) if blink else (200, 255, 210),
-                         (x + int(IDEAL_LO * w), y - 6, int((IDEAL_HI - IDEAL_LO) * w), h + 12), 2)
-        pygame.draw.line(surf, (255, 255, 255), (x + fill, y - 5), (x + fill, y + h + 5), 3)
-        self.text(surf, self.f_small, f"{int(m.pos * 100)}%", WHITE, (x + w // 2, y + h + 18))
+        pygame.draw.rect(surf, (255, 235, 90) if blink else (255, 255, 255),
+                         (x + int(IDEAL_LO * w), y - 5, int((IDEAL_HI - IDEAL_LO) * w), h + 10), 2)
+        pygame.draw.line(surf, (255, 255, 255), (x + fill, y - 4), (x + fill, y + h + 4), 3)
+        self.text(surf, self.f_small, f"{int(m.pos * 100)}%", WHITE, (x + w // 2, y + h + 16))
         if self.turn == "player" and self.phase == "meter":
-            self.text(surf, self.f_small, "[SPACE] stop in the green box!", WHITE, (x + w // 2, y + h + 40))
+            self.text(surf, self.f_small, "[SPACE] STOP IN GREEN BOX", WHITE, (x + w // 2, y + h + 38))
 
     def draw_hud(self, surf):
-        # top-center ROUNDS box
-        r = pygame.Rect(CX - 160, 10, 320, 90)
-        pygame.draw.rect(surf, (0, 0, 0), r, border_radius=16)
-        pygame.draw.rect(surf, (90, 60, 0), r, 3, border_radius=16)
-        self.text(surf, self.f_mid, "ROUNDS", WHITE, (r.centerx, r.y + 28), shadow=False)
-        self.text(surf, self.f_big, str(self.round), WHITE, (r.centerx, r.y + 63), shadow=False)
+        hud_pill(surf, HUD_ROUND, f"ROUND {self.round}", TITLE_FONT)
+        hud_pill(surf, HUD_L_LABEL, "BOT")
+        hud_pill(surf, HUD_L_VALUE, f"{self.pogs['bot']} POGS")
+        hud_pill(surf, HUD_R_LABEL, "PLAYER")
+        hud_pill(surf, HUD_R_VALUE, f"{self.pogs['player']} POGS")
 
-        # pogs collected so far
-        self.box(surf, pygame.Rect(20, 20, 190, 40), f"YOU: {self.pogs['player']} pogs")
-        self.box(surf, pygame.Rect(WIDTH - 210, 20, 190, 40), f"BOT: {self.pogs['bot']} pogs")
-
-        if self.phase == "end":
-            return
-        side = self.turn
-        bx = 20 if side == "player" else WIDTH - 210
+        # timer pill (under the ROUND pill)
+        t_txt = ""
         if self.phase == "transition":
-            secs = int(TURN_TIME)
+            t_txt = f"TIME: {int(TURN_TIME)}"
         elif self.phase == "meter":
-            secs = int(math.ceil(max(0.0, TURN_TIME - self.t)))
+            t_txt = f"TIME: {int(math.ceil(max(0.0, TURN_TIME - self.t)))}"
+        hud_pill(surf, HUD_TIMER, t_txt)
+
+        # the two pills on each side: FLIP + STACK
+        for rects, who in ((HUD_SIDE_L, "bot"), (HUD_SIDE_R, "player")):
+            hud_pill(surf, rects[0], f"FLIP: {self.last_flip[who]}")
+            hud_pill(surf, rects[1], f"STACK: {self.stack}")
+
+        if self.phase in ("end", "transition"):
+            return
+        if self.turn == "player":
+            self.draw_bar(surf, CX - 360, 560, "YOU")      # left of the hands
         else:
-            secs = 0
-        for i, txt in enumerate((f"FLIP: {self.last_flip[side]}", f"STACK: {self.stack}",
-                                 f"TIME: {secs} seconds")):
-            self.box(surf, pygame.Rect(bx, 250 + i * 48, 190, 40), txt)
-        if self.phase != "transition":
-            barx = HAND_X[side] - 330 if side == "player" else HAND_X[side] + 170
-            self.draw_bar(surf, barx, 490, "PLAYER" if side == "player" else "BOT")
+            self.draw_bar(surf, CX + 130, 560, "BOT")      # right of the hands
 
     def draw_messages(self, surf):
         if self.phase == "transition":
             u = clamp(self.t / TRANS_TIME)
             a = int(255 * min(1, u / 0.2, (1 - u) / 0.2))
             who = "YOUR TURN" if self.turn == "player" else "BOT'S TURN"
-            self.text(surf, self.f_huge, who, WHITE, (CX, 190), alpha=max(0, a))
-            self.text(surf, self.f_mid, f"stack: {self.stack} pogs", WHITE, (CX, 245), alpha=max(0, a))
+            self.text(surf, self.f_huge, who, WHITE, (CX, 225), alpha=max(0, a))
+            self.text(surf, self.f_mid, f"stack: {self.stack} pogs", WHITE, (CX, 285), alpha=max(0, a))
         elif self.phase == "target":
             n = len(self.targets)
             title = "CLICK THE CIRCLES!" if self.turn == "player" else "BOT IS CLICKING..."
-            self.text(surf, self.f_big, title, GOLD, (CX, 150))
-            self.text(surf, self.f_mid, f"CIRCLE {min(self.tidx + 1, n)}/{n}   MISSES: {self.misses}", WHITE, (CX, 195))
+            self.text(surf, self.f_big, title, GOLD, (CX, 190))
+            self.text(surf, self.f_mid, f"CIRCLE {min(self.tidx + 1, n)}/{n}   MISSES: {self.misses}", WHITE, (CX, 235))
         elif self.phase == "tresult":
-            self.text(surf, self.f_big, self.pen_title, self.pen_color, (CX, 150))
-            self.text(surf, self.f_mid, self.pen_sub, WHITE, (CX, 195))
+            self.text(surf, self.f_big, self.pen_title, self.pen_color, (CX, 190))
+            self.text(surf, self.f_mid, self.pen_sub, WHITE, (CX, 235))
         elif self.phase in ("lock", "smash") or (self.phase == "meter" and self.meter.locked):
-            self.text(surf, self.f_big, strike_name(self.power), GOLD, (CX, 150))
+            self.text(surf, self.f_big, strike_name(self.power), GOLD, (CX, 190))
         elif self.phase in ("flip", "collect"):
-            self.text(surf, self.f_big, self.msg, GOLD, (CX, 140))
-            self.text(surf, self.f_mid, self.msg2, WHITE, (CX, 185))
+            self.text(surf, self.f_big, self.msg, GOLD, (CX, 185))
+            self.text(surf, self.f_mid, self.msg2, WHITE, (CX, 230))
 
     def draw(self, mouse):
         c = self.canvas
@@ -2275,11 +2299,6 @@ def draw_score(mouse, bg=None):
         WIN.blit(sign, SCORE_SIGN.topleft)                            # YOUR SCORE sign
     else:
         draw_sign(SCORE_PLANK, "SCORE")
-
-
-
-
-
 
     # table area = the paper minus a small margin (and the scroll strip on the right)
     x0 = t.x + 20
@@ -2462,6 +2481,68 @@ def find_file(names):
     return None
 
 
+# ---------------------------------------------------------------------
+#  LEVEL LOGOS (visual only): each level has its own logo in the gold frame.
+#  EDIT THE FILE NAMES to match your PNGs (put your exact name FIRST in each list).
+#  Green = EASY, blue = MEDIUM, red = HARD. If a file is not found, a coloured
+#  shield is drawn instead so the game never crashes.
+# ---------------------------------------------------------------------
+LEVEL_LOGO_FILES = {
+    "EASY":   ["easymode_logo.png", "easylogo.png", "logo_easy.png", "easy_icon.png", "easy_badge.png"],
+    "MEDIUM": ["mediummode_logo.png", "mediumlogo.png", "logo_medium.png", "medium_icon.png", "medium_badge.png"],
+    "HARD":   ["hardmode_logo.png", "hardlogo.png", "logo_hard.png", "hard_icon.png", "hard_badge.png"],
+}
+LEVEL_COLORS = {"EASY": (60, 200, 110), "MEDIUM": (60, 150, 230), "HARD": (230, 60, 50)}
+_LOGO_CACHE = {}
+
+
+def level_logo(name):
+    if name in _LOGO_CACHE:
+        return _LOGO_CACHE[name]
+    if LOGO_HAS_FRAME:
+        iw, ih = LOGO_FRAME.w, LOGO_FRAME.h              # the picture IS the frame, so fill the whole spot
+    else:
+        iw, ih = LOGO_FRAME.w - 40, LOGO_FRAME.h - 40
+    img = None
+    fname = find_file(LEVEL_LOGO_FILES[name])
+    if fname:
+        pic = load_image(fname)
+        if pic is not None:
+            pic = crop_to_content(pic)
+            k = min(iw / pic.get_width(), ih / pic.get_height())
+            size = (max(1, int(pic.get_width() * k)), max(1, int(pic.get_height() * k)))
+            img = pygame.transform.smoothscale(pic, size) if k < 1 else pygame.transform.scale(pic, size)
+    if img is None:                                   # placeholder shield
+        img = pygame.Surface((iw, ih), pygame.SRCALPHA)
+        pts = [(iw // 2, 4), (iw - 6, ih // 5), (iw - 14, ih * 3 // 4),
+               (iw // 2, ih - 4), (14, ih * 3 // 4), (6, ih // 5)]
+        pygame.draw.polygon(img, LEVEL_COLORS[name], pts)
+        pygame.draw.polygon(img, (20, 20, 30), pts, 5)
+        text_center(BIG_FONT, name[0], (20, 20, 30), (iw // 2, ih // 2), img)
+    _LOGO_CACHE[name] = img
+    return img
+
+
+def draw_level_logo(mouse):
+    """visual only: shows the logo of the hovered level, else the chosen level, else '?'"""
+    hov = next((n for n, r in LEVEL_RECTS.items() if r.collidepoint(mouse)), None)
+    name = hov or (DIFFICULTY if DIFF_CHOSEN else None)
+    fr = LOGO_FRAME
+    if name is not None and LOGO_HAS_FRAME:
+        img = level_logo(name)                           # frame + logo in one picture
+        WIN.blit(img, img.get_rect(center=fr.center))
+        return
+    box = ui_img("logo_frame", fr.size)                  # optional: one shared empty frame picture
+    if box is None:                                      # file missing: use the drawn one
+        box = pixel_box(fr.w, fr.h, (86, 40, 14), (236, 170, 40), (255, 214, 90), (200, 140, 30))
+    WIN.blit(box, box.get_rect(center=fr.center))
+    if name is None:
+        text_center(HUGE_FONT, "?", (86, 40, 14), fr.center)
+    else:
+        img = level_logo(name)
+        WIN.blit(img, img.get_rect(center=fr.center))
+
+
 def vs_card_surface(title, sub):
     key = ("vs", title)
     if key in _CARD_CACHE:
@@ -2571,11 +2652,12 @@ def draw_mode_select(mouse):
     if NOTICE[1] > 0:
         draw_notice((INFO_X + 170, 385), (255, 110, 90))
     else:
-        text_center(MID_FONT, "LEVEL DIFFICULTY", GOLD, (INFO_X + 135, 385), shadow=True)
+        text_center(MID_FONT, "LEVEL DIFICULTY", GOLD, (INFO_X + 135, 385), shadow=True)
     for name, r in LEVEL_RECTS.items():
         selected = DIFF_CHOSEN and DIFFICULTY == name
         button(r, name, r.collidepoint(mouse) or selected, MID_FONT)
 
+    draw_level_logo(mouse)                      # visual only: the logo of the level
     button(MODE_BACK, "BACK", MODE_BACK.collidepoint(mouse), MID_FONT)
 
 
@@ -2589,10 +2671,10 @@ def draw_hamburger(mouse):
     if pic is not None:
         WIN.blit(pic, r.topleft)                                      # YOUR hamburger picture
         return
-    s = pixel_box(r.w, r.h, (60, 25, 5), (139, 69, 19), (176, 102, 42), (104, 48, 12))
+    s = btn_surface(r.w, r.h, "gold")                                 # gold button with dark bars
     WIN.blit(s, s.get_rect(center=r.center))
     for i in range(3):
-        pygame.draw.rect(WIN, WHITE, (r.x + r.w // 5, r.y + r.h // 4 + i * (r.h // 5), r.w * 3 // 5, 4))
+        pygame.draw.rect(WIN, (30, 15, 5), (r.x + r.w // 5, r.y + r.h // 4 + i * (r.h // 5), r.w * 3 // 5, 5))
 
 
 def draw_pause(mouse, view, snap):
@@ -2622,9 +2704,103 @@ def scroll_scores(dy):
 # =====================================================================
 #  MAIN LOOP
 # =====================================================================
+# =====================================================================
+#  OPENING INTRO  (the first thing you see when the game starts)
+#  black screen -> the logo rises from the bottom-left corner, grows while it flies to the middle,
+#  rests for a moment, then speeds off to the right -> menu + the home page music starts.
+#  Click or press any key to skip it.
+#  All the numbers below were measured from the reference video (1280x720) and are scaled to the window.
+# =====================================================================
+INTRO_LOGO_FILES = ["python_logo.png", "pythonlogo.png", "Python_Logo.png", "python-logo.png",
+                    "PythonLogo.png", "python.png", "logo_python.png"]   # YOUR logo picture: first one found is used
+                                                                          # (not found -> the logo built into this file)
+INTRO_PRE = 0.4          # black screen before the logo appears
+INTRO_RISE = 0.9         # logo flies from the line to the middle
+INTRO_HOLD = 0.7         # logo rests in the middle
+INTRO_SLIDE = 0.67       # logo speeds off to the right
+INTRO_POST = 0.25        # black screen at the end, then the menu fades in
+T_INTRO_SLIDE = INTRO_PRE + INTRO_RISE + INTRO_HOLD
+INTRO_TOTAL = T_INTRO_SLIDE + INTRO_SLIDE + INTRO_POST
+
+# (seconds, value) keyframes, linearly interpolated.  P = 0..1 progress of the diagonal flight.
+_INTRO_RISE_P = [(0, 0), (0.03, .033), (0.10, .094), (0.17, .223), (0.20, .287), (0.23, .357), (0.27, .435),
+                 (0.30, .514), (0.33, .582), (0.37, .644), (0.40, .703), (0.47, .773), (0.50, .816),
+                 (0.57, .895), (0.60, .919), (0.63, .94), (0.70, .964), (0.77, .988), (0.90, 1.0)]
+_INTRO_SLIDE_X = [(0, 641), (0.03, 676), (0.07, 694), (0.10, 718), (0.17, 763), (0.20, 803), (0.27, 936),
+                  (0.33, 1077), (0.40, 1217), (0.53, 1333), (0.67, 1400)]
+
+_INTRO_LOGO_B64 = """
+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
+"""
+_INTRO_LOGO = []
+
+
+def _keys(keys, t):
+    if t <= keys[0][0]:
+        return keys[0][1]
+    for (t0, v0), (t1, v1) in zip(keys, keys[1:]):
+        if t <= t1:
+            return v0 + (v1 - v0) * (t - t0) / (t1 - t0)
+    return keys[-1][1]
+
+
+def draw_intro(t):
+    if not _INTRO_LOGO:
+        img = load_first(INTRO_LOGO_FILES)
+        if img is None:
+            img = pygame.image.load(io.BytesIO(base64.b64decode("".join(_INTRO_LOGO_B64.split())))).convert()
+        _INTRO_LOGO.append(img)
+    logo = _INTRO_LOGO[0]
+    sx, sy = WIDTH / 1280, HEIGHT / 720             # video space -> window space
+    WIN.fill((0, 0, 0))
+    if t < INTRO_PRE:
+        return
+    lt = t - INTRO_PRE
+    if lt < INTRO_RISE:                                  # fly in from the bottom-left corner
+        P = _keys(_INTRO_RISE_P, lt)
+        cx, cy, size = 59 + 582 * P, 702 - 328 * P, 58 + 144 * P
+    elif t < T_INTRO_SLIDE:                              # rest
+        cx, cy, size = 641, 374, 202
+    else:                                                # speed off to the right
+        cx, cy, size = _keys(_INTRO_SLIDE_X, t - T_INTRO_SLIDE), 374, 202
+    w = max(2, int(size * sy))
+    h = max(2, int(size * sy * logo.get_height() / logo.get_width()))
+    img = pygame.transform.smoothscale(logo, (w, h))
+    WIN.blit(img, (int(cx * sx - w / 2), int(cy * sy - h / 2)))
+
+
 def main():
     global scroll_offset, SELECTED_MODE, DIFF_CHOSEN
-    screen = "menu"          # "menu" | "score" | "exit" | "gamemodes" | "game"
+    screen = "intro"         # "intro" | "menu" | "score" | "exit" | "gamemodes" | "game"
+    intro_t = 0.0
     prev_screen = screen
     game = None
     paused = False
@@ -2647,6 +2823,11 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
+                continue
+
+            if screen == "intro":                         # any click / key skips the opening
+                if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                    intro_t = INTRO_TOTAL
                 continue
 
 # ---------------- IN GAME ----------------
@@ -2790,13 +2971,21 @@ def main():
                         play("click")
                         screen = "menu"
 
+        if screen == "intro":
+            intro_t += dt
+            if intro_t >= INTRO_TOTAL:
+                screen = "menu"
+                play_bgm("menu")                          # home page music starts only after the intro
+
         if screen != prev_screen:
             fade = 1.0
             CONFETTI.clear()
             NOTICE[1] = 0.0
             prev_screen = screen
 
-        if screen == "menu":
+        if screen == "intro":
+            draw_intro(intro_t)
+        elif screen == "menu":
             draw_menu(mouse)
         elif screen == "score":
             draw_score(mouse)
