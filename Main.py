@@ -245,7 +245,7 @@ def make_placeholder_bg():
     pygame.draw.rect(s, (60, 55, 60), (0, h - 30, w, 30))
     for lx in range(0, w, 16):
         pygame.draw.rect(s, (240, 220, 140), (lx, h - 14, 8, 2))
-    return pygame.transform.scale(s, (WIDTH, HEIGHT))
+    return pygame.transform.scale(s, (WIDTH, HEIGHT)).convert()
 
 
 _bg = load_image("PIXELBGPH.png", alpha=False)
@@ -293,10 +293,14 @@ def load_first(names, alpha=True):
 
 def make_band_pile(ring):
     """turn ONE rubber band picture into a little pile of bands"""
-    ring = scaled_to_width(ring, 90)
+    # Pinaliit mula 90 papuntang 65
+    ring = scaled_to_width(ring, 30)
+    
     if BAND_PILE <= 1:
         return ring
-    pile = pygame.Surface((ring.get_width() + 80, ring.get_height() + 80), pygame.SRCALPHA)
+        
+    # Binawasan ang padding mula 80 papuntang 50
+    pile = pygame.Surface((ring.get_width() + 50, ring.get_height() + 50), pygame.SRCALPHA)
     rnd = random.Random(4)
     for i in range(BAND_PILE):
         r = pygame.transform.rotozoom(ring, rnd.randint(-40, 40) + i * 15, 1.0)
@@ -367,7 +371,7 @@ def make_floor():
             px += rnd.choice((-1, 0, 1))
             py += 1
     surf = pygame.transform.scale(small, (sw * P, sh * P))
-    return surf.subsurface((0, 0, HALF, h)).copy()
+    return surf.subsurface((0, 0, HALF, h)).copy().convert()
 
 
 def make_hands():
@@ -410,7 +414,9 @@ HANDS_TOP_SHADOW = silhouette(HANDS_TOP_IMG, 80)
 HANDS_H = HANDS_TOP_IMG.get_height() + HANDS_ARMS_IMG.get_height()
 HANDS_TOP = HEIGHT + 10 - HANDS_H      # the arms end just below the bottom edge of the screen
 BANDS = make_bands()
-BAND_ICON = scaled_to_width(BANDS, 44)
+
+
+
 BAND_SHADOW = pygame.Surface((BANDS.get_width(), 26), pygame.SRCALPHA)
 pygame.draw.ellipse(BAND_SHADOW, (0, 0, 0, 70), BAND_SHADOW.get_rect())
 SPEED_LINE = pygame.Surface((3, 46), pygame.SRCALPHA)

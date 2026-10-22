@@ -24,13 +24,23 @@ pygame.mixer.init()
 click_sound = pygame.mixer.Sound("button-click.mp3")
 click_sound.set_volume(0.5)
 
-# HOME PAGE BACKGROUND MUSIC
-try:
-    pygame.mixer.music.load("Game_BGM.mp3")
-    pygame.mixer.music.set_volume(0.10)
-    pygame.mixer.music.play(-1)
-except pygame.error as e:
-    print("Could not load background music:", e)
+# BACKGROUND MUSIC SWITCHER
+def play_bgm(track):
+    try:
+        if track == "menu":
+            pygame.mixer.music.load("Game_BGM.mp3")
+        elif track == "karera":
+            pygame.mixer.music.load("GameMode1_BGM.mp3")
+        elif track == "pogs":
+            pygame.mixer.music.load("BGM2.mp3")
+        
+        pygame.mixer.music.set_volume(0.10)
+        pygame.mixer.music.play(-1) # -1 means loop forever
+    except pygame.error as e:
+        print(f"Could not load BGM '{track}':", e)
+
+# HOME PAGE BACKGROUND MUSIC (Start with menu music)
+play_bgm("menu")
 WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -158,9 +168,12 @@ except pygame.error:
 
 
 def play(name):
-    s = SOUNDS.get(name)
-    if s:
-        s.play()
+    if name == "click":
+        click_sound.play() # 👈 Gumamit ng button-click.mp3
+    else:
+        s = SOUNDS.get(name)
+        if s:
+            s.play()
 
 
 # =====================================================================
@@ -259,7 +272,7 @@ def make_placeholder_bg():
     pygame.draw.rect(s, (60, 55, 60), (0, h - 30, w, 30))
     for lx in range(0, w, 16):
         pygame.draw.rect(s, (240, 220, 140), (lx, h - 14, 8, 2))
-    return pygame.transform.scale(s, (WIDTH, HEIGHT))
+    return pygame.transform.scale(s, (WIDTH, HEIGHT)).convert()
 
 
 _bg = load_image("PIXELBGPH.png", alpha=False)
@@ -307,10 +320,14 @@ def load_first(names, alpha=True):
 
 def make_band_pile(ring):
     """turn ONE rubber band picture into a little pile of bands"""
-    ring = scaled_to_width(ring, 90)
+    # Pinaliit mula 90 papuntang 65
+    ring = scaled_to_width(ring, 60)
+    
     if BAND_PILE <= 1:
         return ring
-    pile = pygame.Surface((ring.get_width() + 80, ring.get_height() + 80), pygame.SRCALPHA)
+        
+    # Binawasan ang padding mula 80 papuntang 50
+    pile = pygame.Surface((ring.get_width() + 50, ring.get_height() + 50), pygame.SRCALPHA)
     rnd = random.Random(4)
     for i in range(BAND_PILE):
         r = pygame.transform.rotozoom(ring, rnd.randint(-40, 40) + i * 15, 1.0)
@@ -381,7 +398,7 @@ def make_floor():
             px += rnd.choice((-1, 0, 1))
             py += 1
     surf = pygame.transform.scale(small, (sw * P, sh * P))
-    return surf.subsurface((0, 0, HALF, h)).copy()
+    return surf.subsurface((0, 0, HALF, h)).copy().convert()
 
 
 def make_hands():
@@ -424,7 +441,8 @@ HANDS_TOP_SHADOW = silhouette(HANDS_TOP_IMG, 80)
 HANDS_H = HANDS_TOP_IMG.get_height() + HANDS_ARMS_IMG.get_height()
 HANDS_TOP = HEIGHT + 10 - HANDS_H      # the arms end just below the bottom edge of the screen
 BANDS = make_bands()
-BAND_ICON = scaled_to_width(BANDS, 44)
+
+
 BAND_SHADOW = pygame.Surface((BANDS.get_width(), 26), pygame.SRCALPHA)
 pygame.draw.ellipse(BAND_SHADOW, (0, 0, 0, 70), BAND_SHADOW.get_rect())
 SPEED_LINE = pygame.Surface((3, 46), pygame.SRCALPHA)
@@ -2258,60 +2276,77 @@ def draw_score(mouse, bg=None):
     else:
         draw_sign(SCORE_PLANK, "SCORE")
 
+
+
+
+
+
     # table area = the paper minus a small margin (and the scroll strip on the right)
-    x0 = t.x + 14
-    uw = t.width - 46
-    c1, c2, c3 = int(uw * 0.21), int(uw * 0.135), int(uw * 0.135)
-    c4 = uw - c1 - c2 - c3
+    x0 = t.x + 20
+    uw = t.width - 50
     xr = x0 + uw
-    col1_x = x0 + c1 // 2
-    col2_x = x0 + c1 + c2 // 2
-    col3_x = x0 + c1 + c2 + c3 // 2
-    col4_x = x0 + c1 + c2 + c3 + c4 // 2
-    v1 = x0 + c1
-    v2 = v1 + c2
-    v3 = v2 + c3
+    
+    # 6 columns distribution para sakto sa reference image
+    cw = [int(uw * 0.26), int(uw * 0.08), int(uw * 0.20), int(uw * 0.08), int(uw * 0.20), int(uw * 0.18)]
+    cx = [x0 + sum(cw[:i]) + cw[i] // 2 for i in range(6)]
+    vx = [x0 + sum(cw[:i+1]) for i in range(5)]
 
     # header row (does not scroll)
-    for x, name in ((col1_x, "STREAK"), (col2_x, "BOT"), (col3_x, "YOU"), (col4_x, "GAMEMODES")):
-        text_center(SMALL_FONT, name, BROWN, (x, t.y + HEAD_ROW_H // 2))
+    text_center(SMALL_FONT, "STREAK", BROWN, (cx[0], t.y + HEAD_ROW_H // 2))
+    text_center(SMALL_FONT, "ENEMYMODE", BROWN, ((cx[1] + cx[4]) // 2, t.y + HEAD_ROW_H // 2))
+    # Stacked ang GAME MODES tulad sa picture
+    text_center(DESC_FONT, "GAME", BROWN, (cx[5], t.y + HEAD_ROW_H // 2 - 10))
+    text_center(DESC_FONT, "MODES", BROWN, (cx[5], t.y + HEAD_ROW_H // 2 + 10))
+
+    # Horizontal line under headers
     pygame.draw.line(WIN, LINE_BLUE, (x0, t.y + HEAD_ROW_H), (xr, t.y + HEAD_ROW_H), 2)
 
-    for v in (v1, v2, v3):
-        pygame.draw.line(WIN, LINE_BLUE, (v, t.y + 8), (v, t.y + HEAD_ROW_H), 2)
+    # Vertical lines (drawn once, mula sa ilalim ng title area hanggang ibaba)
+    for v in vx:
+        pygame.draw.line(WIN, LINE_BLUE, (v, t.y + 12), (v, t.bottom - 12), 2)
 
     # scrollable rows
-    clip_rect = pygame.Rect(x0, t.y + HEAD_ROW_H, uw + 2, t.height - HEAD_ROW_H)
+    clip_rect = pygame.Rect(x0, t.y + HEAD_ROW_H + 1, uw + 2, t.height - HEAD_ROW_H - 14)
     old_clip = WIN.get_clip()
     WIN.set_clip(clip_rect)
 
     for i, row in enumerate(SCORES[:MAX_ROWS]):
-        result, bot, player, mode = row
+        if len(row) == 4:
+            result, bot, player, mode = row
+        else:
+            result, bot, player, mode = "tie", 0, 0, "GOMA"
+
         cy = t.y + HEAD_ROW_H + i * ROW_H + ROW_H // 2 - scroll_offset
+        line_y = t.y + HEAD_ROW_H + (i + 1) * ROW_H - scroll_offset
+
+        # Draw horizontal lines in between rows (pumapasok ito sa clip area kapag nag-scroll)
+        pygame.draw.line(WIN, LINE_BLUE, (x0, line_y), (xr, line_y), 2)
+
         if cy < t.y + HEAD_ROW_H - ROW_H or cy > t.bottom + ROW_H:
             continue
-        color = (30, 160, 40) if result == "win" else (230, 40, 40) if result == "defeat" else BROWN
-        text_center(MID_FONT, result, color, (col1_x, cy))
-        text_center(MID_FONT, str(bot), BROWN, (col2_x, cy))
-        text_center(MID_FONT, str(player), BROWN, (col3_x, cy))
-        text_center(SMALL_FONT, mode, BROWN, (col4_x, cy))
+            
+        res_upper = str(result).upper()
+        if "WIN" in res_upper:
+            color = (0, 160, 40)   # Green for WIN
+        elif "DEFEAT" in res_upper:
+            color = (230, 40, 40)  # Red for DEFEAT
+        else:
+            color = BROWN          # Brown for TIE
 
-    for i in range(MAX_ROWS):
-        y = t.y + HEAD_ROW_H + (i + 1) * ROW_H - scroll_offset
-        if t.y + HEAD_ROW_H < y < t.bottom:
-            pygame.draw.line(WIN, LINE_BLUE, (x0, y), (xr, y), 2)
-    for v in (v1, v2, v3):
-        pygame.draw.line(WIN, LINE_BLUE, (v, t.y + HEAD_ROW_H), (v, t.bottom - 10), 2)
+        short_mode = "GOMA" if "KARERA" in str(mode).upper() else "POGS"
+        
+        # Mga text sa loob ng bawat row na naka-center sa saktong columns
+        text_center(SMALL_FONT, res_upper, color, (cx[0], cy))
+        text_center(SMALL_FONT, str(bot), BROWN, (cx[1], cy))
+        text_center(SMALL_FONT, "BOT", BROWN, (cx[2], cy))
+        text_center(SMALL_FONT, str(player), BROWN, (cx[3], cy))
+        text_center(SMALL_FONT, "PLAYER", BROWN, (cx[4], cy))
+        text_center(SMALL_FONT, short_mode, BROWN, (cx[5], cy))
 
-    view_h = t.height - HEAD_ROW_H
-    content_h = len(SCORES[:MAX_ROWS]) * ROW_H
-    if content_h > view_h:
-        track = pygame.Rect(t.right - 18, t.y + HEAD_ROW_H + 4, 5, view_h - 8)
-        pygame.draw.rect(WIN, (214, 160, 148), track, border_radius=3)
-        th = max(24, int(track.height * view_h / content_h))
-        ty = track.y + int((track.height - th) * scroll_offset / max(1, content_h - view_h))
-        pygame.draw.rect(WIN, (86, 36, 30), (track.x, ty, track.width, th), border_radius=3)
     WIN.set_clip(old_clip)
+
+    content_h = len(SCORES[:MAX_ROWS]) * ROW_H
+    view_h = t.height - HEAD_ROW_H
 
     if content_h > view_h:
         text_center(DESC_FONT, "scroll with your mouse wheel", TEXT_COLOR,
@@ -2627,6 +2662,7 @@ def main():
                         snapshot = blur_surface(WIN)          # blurred copy of the game you were playing
                     elif game.handle_event(event) == "menu":
                         screen = "menu"
+                        play_bgm("menu")
                     continue
 
                 # paused: CONTINUE / SCORE / MENU / EXIT
@@ -2651,6 +2687,7 @@ def main():
                                 elif name == "MENU":
                                     paused = False
                                     screen = "menu"
+                                    play_bgm("menu")
                                 elif name == "EXIT":
                                     pause_view = "exit"
                                 break
@@ -2716,6 +2753,10 @@ def main():
                                 game = Game() if key == "karera" else PogsGame(add_result)
                                 paused = False
                                 screen = "game"
+                                if key == "karera":
+                                    play_bgm("karera")
+                                else:
+                                    play_bgm("pogs")
                             else:
                                 play("miss")
                                 set_notice("PICK A LEVEL FIRST!")
