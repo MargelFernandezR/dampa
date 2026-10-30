@@ -24,22 +24,44 @@ pygame.init()
 pygame.mixer.init()
 
 click_sound = pygame.mixer.Sound("button-click.mp3")
-click_sound.set_volume(0.5)
+click_sound.set_volume(0.2)
+menu_click_sound = pygame.mixer.Sound("click_in_menu_selection.mp3")
+menu_click_sound.set_volume(0.5)
+gamemode_click_sound = pygame.mixer.Sound("click_in_gamemode_picking.mp3")
+gamemode_click_sound.set_volume(0.5)
+logo_appear_sound = pygame.mixer.Sound("logo_appear.mp3")
+logo_appear_sound.set_volume(0.6)
+timer_sound = pygame.mixer.Sound("gametimer.mp3")
+timer_sound.set_volume(0.5)
+go_sound = pygame.mixer.Sound("GO.mp3")
+go_sound.set_volume(0.6)
+
+BGM_PLAYLIST = ["Game_BGM.mp3", "GameMode1_BGM.mp3", "BGM1.mp3", "BGM2.mp3", "BGM3.mp3",
+                "music4.mp3", "bgmusic1.mp3", "bgmusic2.mp3", "bgmusic3.mp3"]
+BGM_VOLUME = 0.10
+MUSIC_END = pygame.USEREVENT + 1
+_last_bgm = [None]
+_bgm_started = [False]
+
+def play_next_bgm(fade_ms=0):
+    choices = [t for t in BGM_PLAYLIST if os.path.exists(t) and t != _last_bgm[0]]
+    random.shuffle(choices)
+    for track in choices:
+        try:
+            pygame.mixer.music.load(track)
+            pygame.mixer.music.set_volume(BGM_VOLUME)
+            pygame.mixer.music.play(fade_ms=fade_ms)
+            pygame.mixer.music.set_endevent(MUSIC_END)
+            _last_bgm[0] = track
+            return
+        except pygame.error as e:
+            print(f"Could not load BGM '{track}':", e)
 
 # BACKGROUND MUSIC SWITCHER
 def play_bgm(track):
-    try:
-        if track == "menu":
-            pygame.mixer.music.load("Game_BGM.mp3")
-        elif track == "karera":
-            pygame.mixer.music.load("GameMode1_BGM.mp3")
-        elif track == "pogs":
-            pygame.mixer.music.load("BGM2.mp3")
-        
-        pygame.mixer.music.set_volume(0.10)
-        pygame.mixer.music.play(-1) # -1 means loop forever
-    except pygame.error as e:
-        print(f"Could not load BGM '{track}':", e)
+    if not _bgm_started[0] or not pygame.mixer.music.get_busy():
+        _bgm_started[0] = True
+        play_next_bgm()
 
 # HOME PAGE BACKGROUND MUSIC: starts when the opening intro is finished (see main())
 WIDTH, HEIGHT = 1300, 700
@@ -215,7 +237,11 @@ except pygame.error:
 
 def play(name):
     if name == "click":
-        click_sound.play() # 👈 Gumamit ng button-click.mp3
+        gamemode_click_sound.play()
+    elif name == "menu_click":
+        menu_click_sound.play()
+    elif name == "hover":
+        click_sound.play()
     else:
         s = SOUNDS.get(name)
         if s:
@@ -339,6 +365,10 @@ else:
     LOGO.blit(_s, (8, 8))
     LOGO.blit(_t, (0, 0))
 LOGO_POS = LOGO.get_rect(center=(WIDTH // 2, 190))
+LETTERS = []
+_letter_imgs = [load_image(f"DampaLogo_{i}.png") for i in range(1, 6)]
+if all(_letter_imgs):
+    LETTERS = [pygame.transform.smoothscale(_l, LOGO.get_size()) for _l in _letter_imgs]
 
 # ----- game assets -----
 #   game_bg_pixel.png              -> tall cracked-floor image (scrolls down as the bands travel)
@@ -714,6 +744,7 @@ for _k, _n in UI_FILES.items():
 # ---------------------------------------------------------------------
 FX_DT = [1 / 60]          # main loop writes the frame time here (used for hover animation)
 HOVER = {}                # smooth hover progress per button (0 -> 1)
+MOUSE_MOVED = [False]
 _PX_CACHE = {}
 PX = 4                    # pixel size for panels / signs
 DIM = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -732,6 +763,8 @@ DIFF_PAL = {"EASY": "green", "MEDIUM": "blue", "HARD": "red"}
 def hover_amt(key, on):
     """smooth 0..1 value that eases towards 1 while the mouse is over a button"""
     cur = HOVER.get(key, 0.0)
+    if on and cur == 0.0 and MOUSE_MOVED[0]:
+        play("hover")
     tgt = 1.0 if on else 0.0
     cur += (tgt - cur) * min(1.0, FX_DT[0] * 16)
     if abs(tgt - cur) < 0.01:
@@ -1771,7 +1804,7 @@ class Game:
             text_center(SMALL_FONT, "FINISH", TEXT_COLOR, (cx, fy + 26), surf, shadow=True)
 
         # progress bar towards the finish line
-        bar = pygame.Rect(14, 110, 12, 440)
+        bar = pygame.Rect(HALF - 26 if is_player else 14, 110, 12, 440)
         pygame.draw.rect(surf, (20, 20, 20), bar.inflate(4, 4), border_radius=8)
         fill = int(bar.height * clamp(D / FINISH_DIST))
         pygame.draw.rect(surf, (255, 220, 90), (bar.x, bar.bottom - fill, bar.width, fill), border_radius=6)
@@ -3083,12 +3116,25 @@ class PogsGame:
 # =====================================================================
 #  MENU / SCORE / EXIT SCREENS
 # =====================================================================
-def draw_menu(mouse):
+REVEAL_SURF = pygame.Surface((WIDTH, HEIGHT))
+REVEAL_SURF.fill((0, 0, 0))
+
+
+def draw_logo(now, amp=1.0):
+    if not LETTERS:
+        WIN.blit(LOGO, LOGO_POS.move(0, int(math.sin(now / 500) * 6 * amp)))
+        return
+    for i, img in enumerate(LETTERS):
+        WIN.blit(img, LOGO_POS.move(0, int(math.sin(now / 420.0 - i * 0.9) * 8 * amp)))
+
+
+def draw_menu(mouse, reveal=1.0):
     now = pygame.time.get_ticks()
     WIN.blit(BG, (0, 0))
     AMBIENT.draw(WIN)
-    bob = int(math.sin(now / 500) * 6)                         # the logo floats up and down
-    WIN.blit(LOGO, LOGO_POS.move(0, bob))
+    k = ease_in_out(clamp(reveal))
+    if reveal >= 1.0:
+        draw_logo(now)
     text_center(SMALL_FONT, TIPS[(now // 4000) % len(TIPS)], GOLD, (WIDTH // 2, 26), shadow=True)
     for label, rect in MENU_BUTTONS.items():
         button(rect, "SCORES" if label == "SCORE" else label, rect.collidepoint(mouse))
@@ -3096,6 +3142,25 @@ def draw_menu(mouse):
     for line in DESCRIPTION:
         text_center(DESC_FONT, line, TEXT_COLOR, (WIDTH // 2, y), shadow=True)
         y += 24
+    if reveal < 1.0:
+        REVEAL_SURF.set_alpha(int(255 * (1.0 - k)))
+        WIN.blit(REVEAL_SURF, (0, 0))
+        draw_logo(now, k)
+
+
+COUNT_FONT = PixelFont(180)
+
+
+def draw_countdown(c):
+    if c < 3.0:
+        text, color = str(3 - int(c)), GOLD
+        k = ease_out(clamp((c - int(c)) * 4))
+        alpha = 255
+    else:
+        text, color = "GO!", (140, 255, 140)
+        k = ease_out(clamp((c - 3.0) * 4))
+        alpha = int(255 * clamp((3.7 - c) / 0.4))
+    pop_text(COUNT_FONT, text, color, (WIDTH // 2, 430), k, alpha=alpha)
 
 
 def draw_score(mouse, bg=None):
@@ -3610,8 +3675,13 @@ INTRO_RISE = 0.9         # logo flies from the line to the middle
 INTRO_HOLD = 0.7         # logo rests in the middle
 INTRO_SLIDE = 0.67       # logo speeds off to the right
 INTRO_POST = 0.25        # black screen at the end, then the menu fades in
+INTRO_DAMPA_IN = 1.1
+INTRO_DAMPA_HOLD = 0.6
+MENU_REVEAL = 1.2
+LETTER_STAGGER = 0.14
 T_INTRO_SLIDE = INTRO_PRE + INTRO_RISE + INTRO_HOLD
-INTRO_TOTAL = T_INTRO_SLIDE + INTRO_SLIDE + INTRO_POST
+T_DAMPA = T_INTRO_SLIDE + INTRO_SLIDE + INTRO_POST
+INTRO_TOTAL = T_DAMPA + INTRO_DAMPA_IN + INTRO_DAMPA_HOLD
 
 # (seconds, value) keyframes, linearly interpolated.  P = 0..1 progress of the diagonal flight.
 _INTRO_RISE_P = [(0, 0), (0.03, .033), (0.10, .094), (0.17, .223), (0.20, .287), (0.23, .357), (0.27, .435),
@@ -3672,6 +3742,19 @@ def draw_intro(t):
     logo = _INTRO_LOGO[0]
     sx, sy = WIDTH / 1280, HEIGHT / 720             # video space -> window space
     WIN.fill((0, 0, 0))
+    if t >= T_DAMPA:
+        if LETTERS:
+            for i, img in enumerate(LETTERS):
+                a = ease_out(clamp((t - T_DAMPA - i * LETTER_STAGGER) / (INTRO_DAMPA_IN - 4 * LETTER_STAGGER)))
+                tmp = img.copy()
+                tmp.fill((255, 255, 255, int(255 * a)), special_flags=pygame.BLEND_RGBA_MULT)
+                WIN.blit(tmp, LOGO_POS.move(0, int(24 * (1 - a))))
+            return
+        a = ease_out(clamp((t - T_DAMPA) / INTRO_DAMPA_IN))
+        tmp = LOGO.copy()
+        tmp.fill((255, 255, 255, int(255 * a)), special_flags=pygame.BLEND_RGBA_MULT)
+        WIN.blit(tmp, LOGO_POS)
+        return
     if t < INTRO_PRE:
         return
     lt = t - INTRO_PRE
@@ -3701,6 +3784,10 @@ def main():
     fade = 1.0               # quick fade-in whenever the screen changes
     fade_surf = pygame.Surface((WIDTH, HEIGHT))
     fade_surf.fill((0, 0, 0))
+    reveal = 1.0
+    logo_sfx_done = False
+    bgm_wait = None
+    countdown = None
 
     while run:
         dt = min(CLOCK.tick(60) / 1000.0, 0.05)
@@ -3708,12 +3795,16 @@ def main():
         if NOTICE[1] > 0:
             NOTICE[1] = max(0.0, NOTICE[1] - dt)
         mouse = pygame.mouse.get_pos()
+        MOUSE_MOVED[0] = pygame.mouse.get_rel() != (0, 0)
         AMBIENT.update(dt)
         update_confetti(dt)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
+                continue
+            if event.type == MUSIC_END:
+                play_next_bgm()
                 continue
 
             if screen == "intro":                         # any click / key skips the opening
@@ -3723,6 +3814,8 @@ def main():
 
 # ---------------- IN GAME ----------------
             if screen == "game":
+                if countdown is not None and countdown < 3.0:
+                    continue
                 if not paused:
                     open_pause = (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
                                  (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
@@ -3792,14 +3885,17 @@ def main():
                 pos = event.pos
                 if screen == "menu":
                     if MENU_BUTTONS["GAMEMODES"].collidepoint(pos):
-                        play("click")
+                        play("menu_click")
+                        pygame.mixer.music.set_endevent()
+                        pygame.mixer.music.fadeout(400)
+                        bgm_wait = 0.5
                         screen = "gamemodes"
                     elif MENU_BUTTONS["SCORE"].collidepoint(pos):
-                        play("click")
+                        play("menu_click")
                         scroll_offset = 0
                         screen = "score"
                     elif MENU_BUTTONS["EXIT"].collidepoint(pos):
-                        play("click")
+                        play("menu_click")
                         screen = "exit"
                 elif screen == "gamemodes":
                     if VS_PVP.collidepoint(pos):
@@ -3886,12 +3982,41 @@ def main():
 
         if screen == "intro":
             intro_t += dt
+            if not logo_sfx_done and T_DAMPA <= intro_t < INTRO_TOTAL:
+                logo_appear_sound.play()
+                logo_sfx_done = True
             if intro_t >= INTRO_TOTAL:
                 screen = "menu"
+                reveal = 0.0
                 play_bgm("menu")                          # home page music starts only after the intro
 
+        if bgm_wait is not None:
+            bgm_wait -= dt
+            if bgm_wait <= 0:
+                bgm_wait = None
+                play_next_bgm(600)
+
+        if reveal < 1.0:
+            reveal = min(1.0, reveal + dt / MENU_REVEAL)
+            if screen != "menu":
+                reveal = 1.0
+
+        if screen == "game" and prev_screen != "game":
+            countdown = 0.0
+            timer_sound.play()
+
+        if screen == "game" and countdown is not None and not paused:
+            old_count = countdown
+            countdown += dt
+            if int(countdown) != int(old_count) and countdown < 3.0:
+                timer_sound.play()
+            if old_count < 3.0 <= countdown:
+                go_sound.play()
+            if countdown >= 3.7:
+                countdown = None
+
         if screen != prev_screen:
-            fade = 1.0
+            fade = 0.0 if (prev_screen == "intro" and screen == "menu") else 1.0
             CONFETTI.clear()
             NOTICE[1] = 0.0
             prev_screen = screen
@@ -3899,7 +4024,7 @@ def main():
         if screen == "intro":
             draw_intro(intro_t)
         elif screen == "menu":
-            draw_menu(mouse)
+            draw_menu(mouse, reveal)
         elif screen == "score":
             draw_score(mouse)
         elif screen == "exit":
@@ -3912,9 +4037,13 @@ def main():
             if paused:
                 draw_pause(mouse, pause_view, snapshot)       # game is frozen: no update()
             else:
-                game.update(dt)
+                counting = countdown is not None and countdown < 3.0
+                if not counting:
+                    game.update(dt)
                 game.draw(mouse)
-                if game.phase != "end":
+                if countdown is not None:
+                    draw_countdown(countdown)
+                if game.phase != "end" and not counting:
                     draw_hamburger(mouse)
 
         draw_confetti(WIN)
