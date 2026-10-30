@@ -3196,7 +3196,7 @@ def draw_score(mouse, bg=None):
     xr = x0 + uw
     
     # 6 columns distribution para sakto sa reference image
-    cw = [int(uw * 0.26), int(uw * 0.08), int(uw * 0.20), int(uw * 0.08), int(uw * 0.20), int(uw * 0.18)]
+    cw = [int(uw * 0.29), int(uw * 0.07), int(uw * 0.20), int(uw * 0.07), int(uw * 0.20), int(uw * 0.17)]
     cx = [x0 + sum(cw[:i]) + cw[i] // 2 for i in range(6)]
     vx = [x0 + sum(cw[:i+1]) for i in range(5)]
 
@@ -3235,11 +3235,15 @@ def draw_score(mouse, bg=None):
             continue
             
         res_upper = str(result).upper()
-        is_pvp_row = str(result).lower() in ("p1", "p2", "ptie")
-        if is_pvp_row:                       # PvP row: P1 (left) vs P2 (right)
-            res_txt = "TIE" if str(result).lower() == "ptie" else res_upper
-            color = BROWN if str(result).lower() == "ptie" else (0, 160, 40)
-            left_name, right_name = "P1", "P2"
+        res_lower = str(result).lower()
+        is_pvp_row = res_lower in ("p1", "p2", "ptie")
+        if is_pvp_row:                       # PvP row: PLAYER1 (left) vs PLAYER2 (right)
+            if res_lower == "ptie":
+                res_txt, color = "TIE", BROWN
+            else:
+                res_txt = "PLAYER1 WIN" if res_lower == "p1" else "PLAYER2 WIN"
+                color = (0, 160, 40)
+            left_name, right_name = "PLAYER1", "PLAYER2"
         else:
             res_txt = res_upper
             if "WIN" in res_upper:
@@ -3248,7 +3252,7 @@ def draw_score(mouse, bg=None):
                 color = (230, 40, 40)  # Red for DEFEAT
             else:
                 color = BROWN          # Brown for TIE
-            left_name, right_name = "BOT", "PLAYER"
+            left_name, right_name = "DOT", "PLAYER"
 
         short_mode = "GOMA" if "KARERA" in str(mode).upper() else "POGS"
         
