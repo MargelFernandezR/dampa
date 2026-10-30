@@ -1008,6 +1008,8 @@ ROW_H = 40
 MAX_ROWS = 20
 SCROLL_SPEED = 40        # pixels per scroll
 scroll_offset = 0        # current scroll position
+SCORE_BAR_W = 10         # width ng scrollbar sa gilid ng score paper
+score_grab = None        # hawak ba ang scrollbar? (offset ng mouse sa thumb)
 
 # --- EXIT layout: gold pill banner on top of a paper panel (matches the reference)
 EXIT_PAPER_W = 300                                            # whole dialog is about 1/4 of the screen width
@@ -3166,7 +3168,75 @@ def draw_countdown(c):
     pop_text(COUNT_FONT, text, color, (WIDTH // 2, 430), k, alpha=alpha)
 
 
+# ----- score scrollbar (paper's right margin) ---------------------------------
+def score_scroll_metrics():
+    """(max_scroll, view_h, content_h) - isang pinagbabatayan ng wheel at bar."""
+    view_h = SCORE_TABLE.height - HEAD_ROW_H - 14
+    content_h = len(SCORES[:MAX_ROWS]) * ROW_H
+    return max(0, content_h - view_h), view_h, content_h
+
+
+def score_bar_rects():
+    """(track, thumb) ng scrollbar; thumb=None kapag walang dapat i-scroll."""
+    t = SCORE_TABLE
+    max_scroll, view_h, content_h = score_scroll_metrics()
+    track = pygame.Rect(t.right - 21, t.y + HEAD_ROW_H, SCORE_BAR_W, view_h)
+    if max_scroll <= 0:
+        return track, None
+    thumb_h = max(26, int(track.h * view_h / max(content_h, 1)))
+    span = track.h - thumb_h
+    thumb_y = track.y + (int(span * scroll_offset / max_scroll) if span > 0 else 0)
+    return track, pygame.Rect(track.x, thumb_y, track.w, thumb_h)
+
+
+def score_bar_drag_to(my):
+    global scroll_offset
+    track, thumb = score_bar_rects()
+    if thumb is None:
+        return
+    max_scroll, _, _ = score_scroll_metrics()
+    span = track.h - thumb.h
+    if span <= 0:
+        return
+    rel = max(0, min(my - score_grab - track.y, span))
+    scroll_offset = int(max_scroll * rel / span)
+
+
+def score_bar_event(event):
+    """Click/drag sa scrollbar. True kung siya ang humawak ng event."""
+    global score_grab
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        track, thumb = score_bar_rects()
+        if thumb is not None and track.collidepoint(event.pos):
+            if thumb.collidepoint(event.pos):
+                score_grab = event.pos[1] - thumb.y
+            else:
+                score_grab = thumb.h // 2          # click sa track: jump + drag
+                score_bar_drag_to(event.pos[1])
+            return True
+    elif event.type == pygame.MOUSEMOTION and score_grab is not None:
+        score_bar_drag_to(event.pos[1])
+        return True
+    elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and score_grab is not None:
+        score_grab = None
+        return True
+    return False
+
+
+def draw_score_bar():
+    track, thumb = score_bar_rects()
+    if thumb is None:
+        return
+    pygame.draw.rect(WIN, (205, 170, 124), track, border_radius=5)
+    pygame.draw.rect(WIN, (124, 78, 40), track, 2, border_radius=5)
+    pygame.draw.rect(WIN, (128, 80, 42), thumb, border_radius=5)
+    pygame.draw.rect(WIN, BROWN, thumb, 2, border_radius=5)
+    pygame.draw.line(WIN, (186, 134, 82), (thumb.x + 3, thumb.y + 5),
+                     (thumb.x + 3, thumb.bottom - 6), 2)
+
+
 def draw_score(mouse, bg=None):
+    global score_grab
     backdrop(bg)
     t = SCORE_TABLE
 
@@ -3210,9 +3280,12 @@ def draw_score(mouse, bg=None):
     # Horizontal line under headers
     pygame.draw.line(WIN, LINE_BLUE, (x0, t.y + HEAD_ROW_H), (xr, t.y + HEAD_ROW_H), 2)
 
-    # Vertical lines (drawn once, mula sa ilalim ng title area hanggang ibaba)
-    for v in vx:
-        pygame.draw.line(WIN, LINE_BLUE, (v, t.y + 12), (v, t.bottom - 12), 2)
+    # Vertical lines: ang group separators (pagkatapos ng STREAK at bago ang
+    # GAME MODES) ay dumadaan sa header; ang mga panloob na linya ay nagsisimula
+    # sa ilalim ng header para hindi matamaan ang ENEMYMODE.
+    for i, v in enumerate(vx):
+        top = t.y + 12 if i in (0, 4) else t.y + HEAD_ROW_H
+        pygame.draw.line(WIN, LINE_BLUE, (v, top), (v, t.bottom - 12), 2)
 
     # scrollable rows
     clip_rect = pygame.Rect(x0, t.y + HEAD_ROW_H + 1, uw + 2, t.height - HEAD_ROW_H - 14)
@@ -3265,12 +3338,13 @@ def draw_score(mouse, bg=None):
         text_center(SMALL_FONT, short_mode, BROWN, (cx[5], cy))
 
     WIN.set_clip(old_clip)
+    if not pygame.mouse.get_pressed()[0]:
+        score_grab = None
+    draw_score_bar()
 
-    content_h = len(SCORES[:MAX_ROWS]) * ROW_H
-    view_h = t.height - HEAD_ROW_H
-
-    if content_h > view_h:
-        text_center(DESC_FONT, "scroll with your mouse wheel", TEXT_COLOR,
+    max_scroll, _, _ = score_scroll_metrics()
+    if max_scroll > 0:
+        text_center(DESC_FONT, "drag the bar or use the mouse wheel", TEXT_COLOR,
                     (t.x + 150, SCORE_BACK.centery), shadow=True)
     button(SCORE_BACK, "BACK", SCORE_BACK.collidepoint(mouse), MID_FONT)
 
@@ -3659,9 +3733,8 @@ def draw_pause(mouse, view, snap):
 
 def scroll_scores(dy):
     global scroll_offset
-    scroll_offset -= dy * SCROLL_SPEED
-    max_scroll = max(0, len(SCORES[:MAX_ROWS]) * ROW_H - (SCORE_TABLE.height - HEAD_ROW_H))
-    scroll_offset = max(0, min(scroll_offset, max_scroll))
+    max_scroll, _, _ = score_scroll_metrics()
+    scroll_offset = max(0, min(scroll_offset - dy * SCROLL_SPEED, max_scroll))
 
 
 # =====================================================================
@@ -3820,6 +3893,11 @@ def main():
             if screen == "intro":                         # any click / key skips the opening
                 if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
                     intro_t = INTRO_TOTAL
+                continue
+
+            # score scrollbar (menu SCORE screen o paused SCORE view)
+            score_open = (screen == "score") or (screen == "game" and paused and pause_view == "score")
+            if score_open and score_bar_event(event):
                 continue
 
 # ---------------- IN GAME ----------------
