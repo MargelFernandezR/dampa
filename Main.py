@@ -1984,14 +1984,15 @@ def strike_name(p):
 # ---------------------------------------------------------------------
 POG_BOUNCE_DAMP = 0.55          # bawat talbog, bumabagal ang takbo sa sahig
 
-# gaano pa kalayo ang tinatakbo pagkatapos ng unang arc (bounces + skid),
-# bilang fraction ng unang arc. Ginagamit para tama ang final landing spot.
-POG_TAIL = 0.0
-_v = 1.0
-for _d, _h in POG_BOUNCES:
-    POG_TAIL += _d * _v
-    _v *= POG_BOUNCE_DAMP
-POG_TAIL += (POG_SLIDE_T / 0.50) * _v
+def pog_tail_factor(T):
+    """exact na layo ng bounces + skid pagkatapos ng unang arc,
+    bilang fraction ng unang arc. Nakadepende ito sa flight time T."""
+    v = 1.0
+    s = 0.0
+    for d, _h in POG_BOUNCES:
+        s += d * v
+        v *= POG_BOUNCE_DAMP
+    return s + (POG_SLIDE_T / max(1e-6, T)) * v
 
 HAND_KEEPOUT = pygame.Rect(CX - 205, CY + 15, 410, HEIGHT)   # huwag patungo dito ang mga pog
 
@@ -2520,7 +2521,6 @@ class PogsGame:
         # flying pogs - real projectile motion: launch -> arc -> bounce -> skid -> settle
         self.flying = []
         spread = 1.25 if p > 0.95 else 1.0
-        K = 1.0 + POG_TAIL                                  # rest = start + (ex-start)*K
         for k in range(flips):
             ang = random.uniform(0, math.tau)
             rad = random.uniform(0.0, 1.0) ** 1.2
@@ -2530,12 +2530,15 @@ class PogsGame:
             rx = clamp(CX + math.cos(ang) * travel, 255, 1045)
             ry = clamp(CY + math.sin(ang) * travel * 0.62, 110, 495)
             rx, ry = _out_of_hands(rx, ry)                  # huwag sa ibabaw ng kamay
-            ex = clamp(CX + (rx - CX) / K, 230, 1070)       # dulo ng unang arc
-            ey = clamp(CY + (ry - CY) / K, 95, 560)
             T = random.uniform(*POG_FLIGHT_T)
+            sx = CX + random.uniform(-5, 5)                 # tunay na simula (may jitter)
+            sy = CY - random.uniform(0, 10)
+            K = 1.0 + pog_tail_factor(T)                    # exact: rest = start + (ex-start)*K
+            ex = clamp(sx + (rx - sx) / K, 230, 1070)       # dulo ng unang arc
+            ey = clamp(sy + (ry - sy) / K, 95, 560)
             f = {
-                "sx": CX + random.uniform(-5, 5),
-                "sy": CY - random.uniform(0, 10),
+                "sx": sx,
+                "sy": sy,
                 "ex": ex,
                 "ey": ey,
                 "delay": random.uniform(0, 0.13),
@@ -2575,7 +2578,6 @@ class PogsGame:
 
         # flat na pog na tatama sana sa gilid ng pile -> ilayo nang kaunti,
         # para ang mga NAKATAGILID lang ang nasa ibabaw ng pile (hindi sticker-like)
-        K = 1.0 + POG_TAIL
         for f in self.flying:
             if f["on_heap"]:
                 continue
@@ -2589,6 +2591,7 @@ class PogsGame:
                     dx, dy, d = math.cos(a), math.sin(a), 1.0
                 rx, ry = CX + dx / d * clear, CY + dy / d * clear
                 rx, ry = _out_of_hands(rx, ry)
+                K = 1.0 + pog_tail_factor(f["T"])
                 f["ex"] = clamp(f["sx"] + (rx - f["sx"]) / K, 230, 1070)
                 f["ey"] = clamp(f["sy"] + (ry - f["sy"]) / K, 95, 560)
                 f["rest"] = pog_rest_point(f)
