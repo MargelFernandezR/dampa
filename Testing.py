@@ -1,4 +1,3 @@
-
 import pygame
 import sys
 import json
@@ -23,25 +22,46 @@ pygame.init()
 pygame.mixer.init()
 
 click_sound = pygame.mixer.Sound("button-click.mp3")
-click_sound.set_volume(0.5)
+click_sound.set_volume(0.2)
+menu_click_sound = pygame.mixer.Sound("click_in_menu_selection.mp3")
+menu_click_sound.set_volume(0.5)
+gamemode_click_sound = pygame.mixer.Sound("click_in_gamemode_picking.mp3")
+gamemode_click_sound.set_volume(0.5)
+logo_appear_sound = pygame.mixer.Sound("logo_appear.mp3")
+logo_appear_sound.set_volume(0.6)
+timer_sound = pygame.mixer.Sound("gametimer.mp3")
+timer_sound.set_volume(0.5)
+go_sound = pygame.mixer.Sound("GO.mp3")
+go_sound.set_volume(0.6)
+
+BGM_PLAYLIST = ["Game_BGM.mp3", "GameMode1_BGM.mp3", "BGM1.mp3", "BGM2.mp3", "BGM3.mp3",
+                "music4.mp3", "bgmusic1.mp3", "bgmusic2.mp3", "bgmusic3.mp3"]
+BGM_VOLUME = 0.10
+MUSIC_END = pygame.USEREVENT + 1
+_last_bgm = [None]
+_bgm_started = [False]
+
+def play_next_bgm(fade_ms=0):
+    choices = [t for t in BGM_PLAYLIST if os.path.exists(t) and t != _last_bgm[0]]
+    random.shuffle(choices)
+    for track in choices:
+        try:
+            pygame.mixer.music.load(track)
+            pygame.mixer.music.set_volume(BGM_VOLUME)
+            pygame.mixer.music.play(fade_ms=fade_ms)
+            pygame.mixer.music.set_endevent(MUSIC_END)
+            _last_bgm[0] = track
+            return
+        except pygame.error as e:
+            print(f"Could not load BGM '{track}':", e)
 
 # BACKGROUND MUSIC SWITCHER
 def play_bgm(track):
-    try:
-        if track == "menu":
-            pygame.mixer.music.load("Game_BGM.mp3")
-        elif track == "karera":
-            pygame.mixer.music.load("GameMode1_BGM.mp3")
-        elif track == "pogs":
-            pygame.mixer.music.load("BGM2.mp3")
-        
-        pygame.mixer.music.set_volume(0.10)
-        pygame.mixer.music.play(-1) # -1 means loop forever
-    except pygame.error as e:
-        print(f"Could not load BGM '{track}':", e)
+    if not _bgm_started[0] or not pygame.mixer.music.get_busy():
+        _bgm_started[0] = True
+        play_next_bgm()
 
-# HOME PAGE BACKGROUND MUSIC (Start with menu music)
-play_bgm("menu")
+# HOME PAGE BACKGROUND MUSIC: starts when the opening intro is finished (see main())
 WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
 WIN = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -87,22 +107,6 @@ def scaled_to_width(img, width):
     return pygame.transform.scale(img, (width, h))
 
 
-def extend_down(img, need):
-    """gawing mas mahaba ang picture NANG HINDI ini-stretch: inuulit lang ang ilalim na strip"""
-    w, h = img.get_size()
-    if need <= h:
-        return img
-    out = pygame.Surface((w, need), pygame.SRCALPHA)
-    out.blit(img, (0, 0))
-    strip_h = max(1, min(8, h))
-    strip = img.subsurface((0, h - strip_h, w, strip_h)).copy()
-    y = h
-    while y < need:
-        out.blit(strip, (0, y))
-        y += strip_h
-    return out
-
-
 def silhouette(img, alpha=70):
     """a soft black copy of an image's shape - used as a drop shadow"""
     m = pygame.mask.from_surface(img, 10)
@@ -113,6 +117,27 @@ def blur_surface(surf, k=14):
     """cheap strong blur: shrink the picture, then enlarge it smoothly"""
     small = pygame.transform.smoothscale(surf, (WIDTH // k, HEIGHT // k))
     return pygame.transform.smoothscale(small, (WIDTH, HEIGHT))
+
+
+# =====================================================================
+#  HIT RING  (the little ring when a "HIT!" circle is clicked in Dampa Pogs)
+#    waves [x, y, age, life, max_radius]
+# =====================================================================
+def fx_step(waves, dt):
+    for w in waves:
+        w[2] += dt
+    waves[:] = [w for w in waves if w[2] < w[3]]
+
+
+def draw_waves(layer, waves):
+    for x, y, age, life, maxr in waves:
+        if age < 0:
+            continue
+        k = age / life
+        r = int(15 + maxr * ease_out(k))
+        pygame.draw.circle(layer, (255, 255, 255, int(190 * (1 - k))), (int(x), int(y)), r, 4)
+
+
 
 
 # =====================================================================
@@ -166,11 +191,35 @@ def _tone(notes, dur_each, vol=0.22, noise=False):
         return None
 
 
+def _twang():
+    """elastic snap: a quick high 'thwip' that falls in pitch (a flicked rubber band)"""
+    init = pygame.mixer.get_init()
+    if not init or init[1] != -16:
+        return None
+    rate, _, ch = init
+    n = int(rate * 0.20)
+    buf = array("h")
+    for i in range(n):
+        t = i / rate
+        env = math.exp(-18.0 * t)
+        freq = 150.0 + 900.0 * math.exp(-30.0 * t)
+        s = math.sin(2 * math.pi * freq * t) * env
+        s += random.uniform(-1, 1) * 0.35 * math.exp(-60.0 * t)
+        v = int(max(-1.0, min(1.0, s)) * 0.30 * 32767)
+        for _ in range(ch):
+            buf.append(v)
+    try:
+        return pygame.mixer.Sound(buffer=buf.tobytes())
+    except pygame.error:
+        return None
+
+
 SOUNDS = {}
 try:
     if pygame.mixer.get_init():
         SOUNDS = {
             "click": _tone([660, 880], 0.04),
+            "twang": _twang(),
             "lock": _tone([520, 780], 0.05),
             "smash": _tone([0], 0.28, 0.5, noise=True),
             "pop": _tone([300, 520, 700], 0.05),
@@ -186,7 +235,11 @@ except pygame.error:
 
 def play(name):
     if name == "click":
-        click_sound.play() # 👈 Gumamit ng button-click.mp3
+        gamemode_click_sound.play()
+    elif name == "menu_click":
+        menu_click_sound.play()
+    elif name == "hover":
+        click_sound.play()
     else:
         s = SOUNDS.get(name)
         if s:
@@ -222,42 +275,6 @@ def draw_confetti(surf):
     for c in CONFETTI:
         pygame.draw.rect(surf, c[4], (int(c[0]), int(c[1]), c[5], c[5]))
         pygame.draw.rect(surf, (30, 15, 5), (int(c[0]), int(c[1]), c[5], c[5]), 1)
-
-
-# ---- alikabok (dust) sa impact ng hampas ----
-DUST = []
-
-
-def dust_burst(x, y, n=14):
-    """buga ng alikabok pataas mula sa pinagtatamaan ng palad"""
-    for _ in range(n):
-        a = random.uniform(-math.pi * 0.95, -math.pi * 0.05)
-        s = random.uniform(50, 210)
-        DUST.append([x + random.uniform(-52, 52), y + random.uniform(-8, 12),
-                     math.cos(a) * s, math.sin(a) * s * 0.5,
-                     random.uniform(4, 8), 0.0, random.uniform(0.35, 0.7)])
-
-
-def update_dust(dt):
-    for d in DUST:
-        d[0] += d[2] * dt
-        d[1] += d[3] * dt
-        d[2] *= 0.94
-        d[3] += 120 * dt
-        d[5] += dt
-    DUST[:] = [d for d in DUST if d[5] < d[6]]
-
-
-def draw_dust(surf):
-    for x, y, vx, vy, r, age, life in DUST:
-        k = age / life
-        a = int(170 * (1 - k))
-        if a <= 0:
-            continue
-        rad = max(1, int(r * (1 + 0.9 * k)))
-        s = pygame.Surface((rad * 2, rad * 2), pygame.SRCALPHA)
-        pygame.draw.circle(s, (150, 144, 137, a), (rad, rad), rad)
-        surf.blit(s, s.get_rect(center=(int(x), int(y))))
 
 
 class Ambient:
@@ -346,6 +363,10 @@ else:
     LOGO.blit(_s, (8, 8))
     LOGO.blit(_t, (0, 0))
 LOGO_POS = LOGO.get_rect(center=(WIDTH // 2, 190))
+LETTERS = []
+_letter_imgs = [load_image(f"DampaLogo_{i}.png") for i in range(1, 6)]
+if all(_letter_imgs):
+    LETTERS = [pygame.transform.smoothscale(_l, LOGO.get_size()) for _l in _letter_imgs]
 
 # ----- game assets -----
 #   game_bg_pixel.png              -> tall cracked-floor image (scrolls down as the bands travel)
@@ -491,20 +512,78 @@ FLOOR = make_floor()
 FLOOR_FLIP = pygame.transform.flip(FLOOR, False, True)   # flipped copy so repeats line up
 HANDS_TOP_IMG, HANDS_ARMS_IMG = make_hands()
 HANDS_TOP_SHADOW = silhouette(HANDS_TOP_IMG, 80)
-# y ng fingertips kapag nakapahinga. Dating HEIGHT + 10 - HANDS_H (=330) na kapantay
-# ng guma, kaya natatamaan ito ng palad. Ibaba natin para may espasyo sa guma.
-HANDS_TOP = 400
-
-# Ang braso ay HINDI ini-stretch (dati nagiging lastiko). Pinahaba na lang pababa
-# sa pamamagitan ng pag-uulit ng ilalim na strip, para laging abot sa ilalim
-# kahit umangat ang kamay sa smash.
-HAND_ARM_EXTRA = 190
-HANDS_ARMS_IMG = extend_down(HANDS_ARMS_IMG, HANDS_ARMS_IMG.get_height() + HAND_ARM_EXTRA)
-BANDS = make_bands()
+HANDS_ARMS_SHADOW = silhouette(HANDS_ARMS_IMG, 80)       # NEW: forearm shadow (was missing, so the shadow got cut off)
+HANDS_H = HANDS_TOP_IMG.get_height() + HANDS_ARMS_IMG.get_height()
+HANDS_TOP = HEIGHT + 10 - HANDS_H      # the arms end just below the bottom edge of the screen
+BANDS = make_bands()          # the whole pile as ONE picture (kept as a fallback)
 
 
-BAND_SHADOW = pygame.Surface((BANDS.get_width(), 26), pygame.SRCALPHA)
-pygame.draw.ellipse(BAND_SHADOW, (0, 0, 0, 70), BAND_SHADOW.get_rect())
+def _band_ring_image():
+    """ONE rubber band on its own (76px wide, transparent)."""
+    ring = load_first(BAND_FILES)
+    if ring:
+        return scaled_to_width(crop_to_content(remove_white_bg(ring)), 76)
+    ring = pygame.Surface((64, 26), pygame.SRCALPHA)
+    pygame.draw.ellipse(ring, (228, 52, 52), ring.get_rect(), 6)
+    pygame.draw.ellipse(ring, (250, 200, 40), ring.get_rect().inflate(-14, -10), 3)
+    return ring
+
+
+def make_band_rings(n=BAND_PILE):
+    """The pile, but every ring is its OWN sprite so each one can fly, tumble and bounce
+    separately - that is what makes the 'talsik' look real.
+    returns [(surface, (dx, dy))] where dx/dy = resting offset from the middle of the pile."""
+    ring = _band_ring_image()
+    rnd = random.Random(4)
+    out = []
+    for i in range(max(1, n)):
+        r = pygame.transform.rotozoom(ring, rnd.randint(-40, 40) + i * 15, 1.0)
+        # bake a thin dark edge under the band so it stays readable on the grey floor
+        edged = pygame.Surface((r.get_width() + 3, r.get_height() + 3), pygame.SRCALPHA)
+        edged.blit(silhouette(r, 115), (2, 2))
+        edged.blit(r, (0, 0))
+        r = edged
+        out.append((r, (rnd.randint(-10, 10), rnd.randint(-10, 10))))
+    mx = sum(o[0] for _, o in out) / len(out)
+    my = sum(o[1] for _, o in out) / len(out)
+    return [(r, (o[0] - int(round(mx)), o[1] - int(round(my)))) for r, o in out]
+
+
+def make_soft_shadow(w, h, alpha=150):
+    """soft blurred ellipse - a rubber band lying on the floor has no hard shadow edge"""
+    s = pygame.Surface((w, h), pygame.SRCALPHA)
+    steps = max(3, h // 2)
+    for i in range(steps, 0, -1):
+        k = i / steps
+        a = int(alpha * (1 - k) ** 1.1)
+        pygame.draw.ellipse(s, (0, 0, 0, a),
+                            (int(w * (1 - k) / 2), int(h * (1 - k) / 2),
+                             max(2, int(w * k)), max(2, int(h * k))))
+    return s
+
+
+BAND_RINGS = make_band_rings()
+BAND_RING_SHADOWS = []
+for _ring, _off in BAND_RINGS:
+    BAND_RING_SHADOWS.append(
+        make_soft_shadow(_ring.get_width(), max(10, int(_ring.get_height() * 0.42)), 105))
+
+# one soft contact shadow for the whole pile (used while it sits still on the floor)
+PILE_SHADOW = make_soft_shadow(max(r.get_width() for r, _o in BAND_RINGS) + 8,
+                               max(14, int(max(r.get_height() for r, _o in BAND_RINGS) * 0.34)), 75)
+
+
+def make_puff(radius, color=(226, 219, 204)):
+    """soft dust cloud (alpha gradient circle) - the alikabok that flies up on impact"""
+    s = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    for i in range(radius, 0, -1):
+        k = i / radius
+        a = int(238 * (1.0 - k) ** 0.65)
+        pygame.draw.circle(s, (color[0], color[1], color[2], a), (radius, radius), i)
+    return s
+
+
+DUST_PUFFS = {r: make_puff(r) for r in (9, 14, 20, 27, 34)}
 SPEED_LINE = pygame.Surface((3, 46), pygame.SRCALPHA)
 SPEED_LINE.fill((255, 255, 255, 70))
 
@@ -616,6 +695,7 @@ UI_FILES = {
     # in-game menu
     "pause_panel":   "board2.png",     # paper panel (no buttons)
     "hamburger":     "hamburger.png",       # the menu icon button
+    "logo_frame":    "buttonsize1.png",      # optional: empty frame for the level logo (only used if LOGO_HAS_FRAME = False)
 }
 BTN_KEY = {"gold": "button", "green": "easy", "blue": "normal", "red": "hard"}
 _UI_RAW = {}
@@ -662,6 +742,7 @@ for _k, _n in UI_FILES.items():
 # ---------------------------------------------------------------------
 FX_DT = [1 / 60]          # main loop writes the frame time here (used for hover animation)
 HOVER = {}                # smooth hover progress per button (0 -> 1)
+MOUSE_MOVED = [False]
 _PX_CACHE = {}
 PX = 4                    # pixel size for panels / signs
 DIM = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -680,6 +761,8 @@ DIFF_PAL = {"EASY": "green", "MEDIUM": "blue", "HARD": "red"}
 def hover_amt(key, on):
     """smooth 0..1 value that eases towards 1 while the mouse is over a button"""
     cur = HOVER.get(key, 0.0)
+    if on and cur == 0.0 and MOUSE_MOVED[0]:
+        play("hover")
     tgt = 1.0 if on else 0.0
     cur += (tgt - cur) * min(1.0, FX_DT[0] * 16)
     if abs(tgt - cur) < 0.01:
@@ -846,6 +929,29 @@ def hud_box(target, rect, color=HUD_COLOR):
     pygame.draw.rect(target, (60, 25, 5), rect, 3, border_radius=10)
 
 
+def hud_pill(target, rect, text="", font=None):
+    """gold pill (your button.png) with dark text - used for the whole in-game HUD"""
+    font = font or SMALL_FONT
+    img = ui_img("button", rect.size)
+    if img is None:
+        img = btn_surface(rect.w, rect.h, "gold")
+    target.blit(img, img.get_rect(center=rect.center))
+    if text:
+        text_center(font, text, BTN_PAL["gold"][0], rect.center, target)
+
+
+# in-game HUD layout (from the reference images)
+HUD_ROUND   = pygame.Rect(WIDTH // 2 - 190, 10, 380, 84)      # big ROUND pill
+HUD_TIMER   = pygame.Rect(0, 0, 150, 36)
+HUD_TIMER.midtop = (WIDTH // 2, 106)                          # the pink-circle spot (timer)
+HUD_L_LABEL = pygame.Rect(WIDTH // 2 - 395, 12, 185, 38)
+HUD_L_VALUE = pygame.Rect(WIDTH // 2 - 395, 58, 185, 38)
+HUD_R_LABEL = pygame.Rect(WIDTH // 2 + 210, 12, 185, 38)
+HUD_R_VALUE = pygame.Rect(WIDTH // 2 + 210, 58, 185, 38)
+HUD_SIDE_L  = [pygame.Rect(12, 165, 185, 40), pygame.Rect(12, 220, 185, 40)]
+HUD_SIDE_R  = [pygame.Rect(WIDTH - 197, 165, 185, 40), pygame.Rect(WIDTH - 197, 220, 185, 40)]
+
+
 #  MENU / SCORE / EXIT LAYOUT
 
 BTN_W, BTN_H, GAP = 340, 72, 18
@@ -874,37 +980,32 @@ TIPS = [
 PANEL_W = 472
 PANEL_X = (WIDTH - PANEL_W) // 2
 
-# --- SCORE layout (kapareho ng reference image)
-SCORE_PAPER = pygame.Rect(0, 0, 742, 350)
-SCORE_PAPER.center = (WIDTH // 2, HEIGHT // 2)
-SCORE_SIGN = pygame.Rect(SCORE_PAPER.x, SCORE_PAPER.y - 72, 290, 58)
-SCORE_BACK = pygame.Rect(0, 0, 216, 50)
-SCORE_BACK.topright = (SCORE_PAPER.right - 8, SCORE_PAPER.bottom + 10)
-
-SCORE_PAD_L, SCORE_PAD_R = 58, 30
-SCORE_TOP_PAD = 22
-SCORE_BOT_PAD = 14
-HEAD_ROW_H = 42
-ROW_H = 30
+# --- SCORE layout: wood board + paper + sign, each its own picture.
+#     The three pieces are placed by ratios of the wood board, so any picture size works.
+SCORE_WOOD_W = 720                                           # width of the wooden board on screen
+_wood_h = int(SCORE_WOOD_W / ui_aspect("score_wood", 735 / 430))
+_sgn_w = int(SCORE_WOOD_W * 0.36)
+_sgn_h = int(_sgn_w / ui_aspect("score_sign", 262 / 178))
+SCORE_SHIFT = (0, 0)          # nudge the WHOLE score screen: (+right / -left, +down / -up)
+_sign_over = max(0, _sgn_h - int(_wood_h * 0.15) + 6)        # how far the sign sticks out above the wood
+_score_total = _sign_over + _wood_h + 20 + 54                # sign top -> bottom of the BACK button
+SCORE_BOARD = pygame.Rect(0, 0, SCORE_WOOD_W, _wood_h)
+SCORE_BOARD.centerx = WIDTH // 2 + SCORE_SHIFT[0]
+SCORE_BOARD.y = max(8, (HEIGHT - _score_total) // 2) + _sign_over + SCORE_SHIFT[1]   # whole group centred
+SCORE_TABLE = pygame.Rect(SCORE_BOARD.x + int(SCORE_WOOD_W * 0.11), SCORE_BOARD.y + int(_wood_h * 0.15),
+                          int(SCORE_WOOD_W * 0.79), int(_wood_h * 0.70))      # the paper
+SCORE_SIGN = pygame.Rect(SCORE_BOARD.x + int(SCORE_WOOD_W * 0.07), SCORE_TABLE.y + 6 - _sgn_h, _sgn_w, _sgn_h)
+SCORE_PLANK = pygame.Rect(SCORE_SIGN.x, SCORE_SIGN.y + int(_sgn_h * 0.30), _sgn_w, int(_sgn_h * 0.70))  # (drawn version only)
+SCORE_BACK = pygame.Rect(SCORE_TABLE.right - 160, SCORE_BOARD.bottom + 20, 160, 54)
+COL_STREAK = 110
+COL_BOT = 70
+COL_YOU = 70
+COL_GAMEMODES = 270
+HEAD_ROW_H = 45
+ROW_H = 40
 MAX_ROWS = 20
-SCROLL_SPEED = ROW_H
-scroll_offset = 0
-
-SCORE_ROWS_TOP = SCORE_PAPER.y + SCORE_TOP_PAD + HEAD_ROW_H
-# bilugan pababa sa buong ROW_H para walang naiipit na kalahating row sa ilalim
-SCORE_VIEW_H = (SCORE_PAPER.bottom - SCORE_BOT_PAD - SCORE_ROWS_TOP) // ROW_H * ROW_H
-SCORE_COLS = [0.20, 0.17, 0.63]        # result badge | mode | score
-
-GREEN_TXT = (0, 160, 40)
-RED_TXT = (230, 40, 40)
-SCORE_RESULTS = {
-    "win":    ("WIN",         GREEN_TXT, "BOT", "PLAYER"),
-    "defeat": ("DEFEAT",      RED_TXT,   "BOT", "PLAYER"),
-    "tie":    ("TIE",         BROWN,     "BOT", "PLAYER"),
-    "p1":     ("P1 WIN",      GREEN_TXT, "P1",  "P2"),
-    "p2":     ("P2 WIN",      GREEN_TXT, "P1",  "P2"),
-    "ptie":   ("TIE",         BROWN,     "P1",  "P2"),
-}
+SCROLL_SPEED = 40        # pixels per scroll
+scroll_offset = 0        # current scroll position
 
 # --- EXIT layout: gold pill banner on top of a paper panel (matches the reference)
 EXIT_PAPER_W = 300                                            # whole dialog is about 1/4 of the screen width
@@ -926,7 +1027,7 @@ EXIT_NO = pygame.Rect(0, 0, _btn_w, _btn_h)
 EXIT_NO.center = (EXIT_PANEL.centerx, EXIT_YES.centery + _btn_h + 14)
 
 # in-game pause menu
-PAUSE_BTN = pygame.Rect(WIDTH - 72, 14, 54, 44)          # the hamburger button
+PAUSE_BTN = pygame.Rect(WIDTH - 84, 12, 66, 62)          # the hamburger button (bigger, like the reference)
 PAUSE_PANEL = pygame.Rect(WIDTH // 2 - 190, 140, 380, 420)
 PAUSE_BUTTONS = {name: pygame.Rect(WIDTH // 2 - 150, 192 + i * 84, 300, 64)
                  for i, name in enumerate(("CONTINUE", "SCORE", "MENU", "EXIT"))}
@@ -964,6 +1065,12 @@ INFO_PANEL = pygame.Rect(740, 80, 520, 520)
 INFO_X = INFO_PANEL.x + 24
 LEVEL_NAMES = ("EASY", "MEDIUM", "HARD")
 LEVEL_RECTS = {name: pygame.Rect(INFO_X + 10, 420 + i * 60, 240, 50) for i, name in enumerate(LEVEL_NAMES)}
+LOGO_FRAME = pygame.Rect(0, 0, 140, 176)
+# fits inside the info panel: top lines up with EASY, bottom lines up with HARD, centred between the buttons and the panel edge
+LOGO_FRAME.centery = (LEVEL_RECTS['EASY'].top + LEVEL_RECTS['HARD'].bottom) // 2
+LOGO_FRAME.centerx = (LEVEL_RECTS['EASY'].right + INFO_PANEL.right) // 2     # spot (right of the level buttons) that shows the level logo
+LOGO_HAS_FRAME = None     # None = AUTO (the game checks if your picture already has the brown border + yellow background)
+                          # True / False = force it
 MODE_BACK = pygame.Rect(INFO_PANEL.right - 190, 618, 170, 54)
 
 
@@ -972,16 +1079,12 @@ MODE_BACK = pygame.Rect(INFO_PANEL.right - 190, 618, 170, 54)
 
 SCORE_FILE = "scores.json"
 DEFAULT_SCORES = [
-    ["p1", 3, 1, "DAMPA KARERA"],
-    ["p2", 1, 3, "DAMPA POGS"],
-    ["defeat", 3, 1, "DAMPA POGS"],
-    ["p2", 0, 4, "DAMPA KARERA"],
-    ["ptie", 2, 2, "DAMPA POGS"],
-    ["defeat", 3, 1, "DAMPA KARERA"],
     ["win", 1, 3, "DAMPA KARERA"],
-    ["p1", 4, 0, "DAMPA KARERA"],
-    ["p2", 0, 4, "DAMPA KARERA"],
-    ["p2", 1, 3, "DAMPA POGS"],
+    ["win", 1, 3, "DAMPA KARERA"],
+    ["defeat", 3, 1, "DAMPA POGS"],
+    ["defeat", 0, 4, "DAMPA POGS"],
+    ["tie", 2, 2, "DAMPA POGS"],
+    ["defeat", 3, 1, "DAMPA POGS"],
 ]
 
 
@@ -1031,12 +1134,9 @@ TIMER_MIN, TIMER_MAX = 1.0, 3.0      # random wait before the smash
 RESULT_TIME = 2.2                    # how long the round result is shown
 TIE_MARGIN = 6                       # px difference that still counts as a tie
 
-BAND_START_Y = 250                   # where the bands sit on screen at the start of the match
-                                     # (dating 330 = kapantay ng kamay, kaya natatakpan ito)
+BAND_START_Y = 330                   # where the bands sit on screen at the start of the match
 BG_H = FLOOR.get_height()
-FOLLOW_AT = 0                        # 0 = hindi lumalayo ang guma; sahig na lang ang gumugulong
-                                     # (dating 100: umaangat ng 100px ang guma kada hampas,
-                                     #  kaya lumalayo ito sa kamay)
+FOLLOW_AT = 100                      # bands rise this many px, then the floor starts scrolling
 MIN_DIST, MAX_DIST = 60, 230         # how far ONE smash sends the bands (weak -> perfect meter)
 FINISH_SMASHES = 2.5                 # finish line = this many PERFECT smashes away (bigger = longer rounds)
 FINISH_DIST = int(MAX_DIST * FINISH_SMASHES)   # distance is kept between smashes, resets every round
@@ -1047,9 +1147,45 @@ METER_W, METER_H, METER_Y = 260, 12, 610
 METER_MASK = pygame.Surface((METER_W, METER_H), pygame.SRCALPHA)
 pygame.draw.rect(METER_MASK, (255, 255, 255, 255), METER_MASK.get_rect(), border_radius=6)
 
-T_IMPACT = 0.25                      # moment the hands hit the floor (seconds after smash starts)
-BAND_TIME = 1.4                      # how long the bands take to slide up
-SMASH_HITSTOP = 0.05                 # sandaling pagyelo sa impact para ramdam ang bigat
+# ---------------------------------------------------------------------
+#  HAMPAS + TALSIK timing (Dampa Karera)
+#  A real slam reads in 5 beats:
+#    1) wind-up (hands pull back)  2) accelerate + slam  3) squash on the floor
+#    4) damped rebound             5) the pile launches, tumbles, bounces, slides
+#  Tweak the numbers here if you want it snappier or heavier.
+# ---------------------------------------------------------------------
+T_GROW0 = 0.13                       # wind-up starts (hands pull back a little)
+T_IMPACT = 0.55                      # the palm hits the floor / the bands
+T_SQUASH = 0.07                      # how long the hand stays flattened on contact
+T_RECOIL = 0.30                      # springy return to the resting pose
+IMPACT_HITSTOP = 0.045               # freeze-frame at contact (this is what gives the hit weight)
+STRIKE_MIN, STRIKE_FULL_TIP = 1.20, 300   # weak smash = x1.2 bigger, perfect smash reaches y=300
+BAND_TIME = 1.4                      # how long the bands take to fly, bounce and settle
+BAND_BOUNCES = [(0.40, 1.00), (0.22, 0.40), (0.14, 0.16), (0.10, 0.06)]   # (airtime, height) per bounce
+BAND_HOP_MIN, BAND_HOP_MAX = 18, 74  # how high the pile jumps (weak -> perfect meter)
+BAND_STRETCH = 0.40                  # max elastic stretch as the rings leave the hand
+
+BAND_LAND_FRACS = []
+_f = 0.0
+for _d, _h in BAND_BOUNCES:
+    _f += _d
+    BAND_LAND_FRACS.append(_f)
+BAND_LAND_TIMES = [T_IMPACT + BAND_TIME * f for f in BAND_LAND_FRACS]
+
+
+def band_hop(u, power):
+    """height (px) of the pile above the floor at launch progress u (0..1), plus its peak.
+    First jump is the big one, then a few smaller bounces (like a flicked rubber band)."""
+    peak = BAND_HOP_MIN + (BAND_HOP_MAX - BAND_HOP_MIN) * power
+    if u <= 0.0 or u >= BAND_LAND_FRACS[-1]:
+        return 0.0, peak
+    acc = 0.0
+    for dur, hgt in BAND_BOUNCES:
+        if u < acc + dur:
+            k = (u - acc) / dur
+            return peak * hgt * 4.0 * k * (1.0 - k), peak
+        acc += dur
+    return 0.0, peak
 
 HUD_LEFT = pygame.Rect(266, 20, 176, 54)
 HUD_CENTER = pygame.Rect(452, 10, 382, 72)
@@ -1161,7 +1297,10 @@ class Game:
         self.saved = False
         self.round_msg = ""
         self.final = "tie"
-        self.hitstop = 0.0
+        self.hitstop = 0.0                                  # freeze-frame on impact
+        self.puffs = {"bot": [], "player": []}             # alikabok
+        self.crumbs = {"bot": [], "player": []}            # rubber crumbs
+        self.ring_fx = {"bot": self._make_ring_fx(), "player": self._make_ring_fx()}
         self.start_round()
 
     def set_phase(self, phase):
@@ -1185,7 +1324,100 @@ class Game:
         self.wait = random.uniform(TIMER_MIN, TIMER_MAX)              # the hidden timer
         self.smash_t = None
         self.sfx_done = False
+        self.hitstop = 0.0
+        for key in ("bot", "player"):
+            self.puffs[key].clear()
+            self.crumbs[key].clear()
+        self.ring_fx = {"bot": self._make_ring_fx(), "player": self._make_ring_fx()}
         self.set_phase("meter")                                       # 1) meter first
+
+    # ------------------------------------------------------------ smash effects
+    def _make_ring_fx(self):
+        """random motion for every ring: it decides how each one scatters, spins and hops"""
+        fx = []
+        for _ in range(len(BAND_RINGS)):
+            fx.append(dict(dx=random.uniform(-1.0, 1.0),                    # sideways scatter direction
+                           spread=random.uniform(12, 34),                   # how far it slides sideways
+                           spin=random.uniform(150, 430) * random.choice((-1, 1)),
+                           hop=random.uniform(0.72, 1.15),                  # this ring jumps a bit higher/lower
+                           shrink=random.uniform(0.88, 1.06)))
+        return fx
+
+    def _puff(self, key, x, y, n, power, spread=34, speed=1.0, life=(0.30, 0.70)):
+        """spawn dust particles (side-local coordinates)"""
+        if n <= 0:
+            return
+        lst = self.puffs[key]
+        big = power >= 0.75
+        for _ in range(n):
+            a = random.uniform(-math.pi * 0.95, -math.pi * 0.05)
+            sp = random.uniform(22, 95) * speed * (0.7 + 0.7 * power)
+            lst.append([x + random.uniform(-spread, spread), y + random.uniform(-5, 9),
+                        math.cos(a) * sp, math.sin(a) * sp * 0.5,
+                        random.choice((14, 20, 27)) if big else random.choice((9, 14, 20)),
+                        0.0, random.uniform(*life)])
+
+    def _crumb(self, key, x, y, n, power):
+        """spawn little rubber crumbs that arc up and fall back down"""
+        lst = self.crumbs[key]
+        for _ in range(n):
+            a = random.uniform(-math.pi, 0.0)
+            sp = random.uniform(60, 210) * (0.7 + 0.6 * power)
+            lst.append([x + random.uniform(-26, 26), y + random.uniform(-4, 6),
+                        math.cos(a) * sp, math.sin(a) * sp,
+                        random.randint(3, 5), 0.0, random.uniform(0.35, 0.80),
+                        random.choice(LASTIKO_COLORS)])
+
+    def _impact_burst(self):
+        """the palm lands: alikabok + rubber crumbs on both sides of the screen"""
+        for key, side in (("bot", self.bot), ("player", self.player)):
+            p = side.power
+            _, ground, _, _, _ = self.band_state(side)
+            self._puff(key, HALF // 2, ground + 12, 7 + int(9 * p), p, spread=46, speed=1.0)
+            self._crumb(key, HALF // 2, ground + 6, 4 + int(8 * p), p)
+
+    def _landing_burst(self, k):
+        """the pile touches down again -> a smaller puff of dust"""
+        for key, side in (("bot", self.bot), ("player", self.player)):
+            p = side.power
+            _, ground, _, _, _ = self.band_state(side)
+            if k == 0:
+                self._puff(key, HALF // 2, ground + 20, 4 + int(5 * p), p * 0.7, spread=34,
+                           speed=0.55, life=(0.22, 0.48))
+                self._crumb(key, HALF // 2, ground + 8, 2, p * 0.5)
+            else:
+                self._puff(key, HALF // 2, ground + 18, 2, p * 0.4, spread=22,
+                           speed=0.35, life=(0.18, 0.38))
+
+    def _step_fx(self, dt):
+        for lst in (self.puffs["bot"], self.puffs["player"]):
+            for p in lst:
+                p[0] += p[2] * dt
+                p[1] += p[3] * dt
+                p[2] *= 0.90
+                p[3] = p[3] * 0.90 - 26 * dt              # dust floats up then hangs in the air
+                p[5] += dt
+            lst[:] = [p for p in lst if p[5] < p[6]]
+        for lst in (self.crumbs["bot"], self.crumbs["player"]):
+            for c in lst:
+                c[0] += c[2] * dt
+                c[1] += c[3] * dt
+                c[3] += 900 * dt
+                c[5] += dt
+            lst[:] = [c for c in lst if c[5] < c[6] and c[1] < HEIGHT + 20]
+
+    def _draw_fx(self, surf, key):
+        for x, y, vx, vy, r, age, life in self.puffs[key]:
+            k = clamp(age / life)
+            puff = DUST_PUFFS[r]
+            puff.set_alpha(int(215 * (1.0 - k) ** 0.9))
+            surf.blit(puff, puff.get_rect(center=(int(x), int(y))))
+            puff.set_alpha(255)
+        for x, y, vx, vy, r, age, life, col in self.crumbs[key]:
+            if age > life:
+                continue
+            pygame.draw.rect(surf, col, (int(x), int(y), r + 1, r))
+            pygame.draw.rect(surf, (35, 20, 10), (int(x), int(y), r + 1, r), 1)
 
     # ------------------------------------------------------------ input
     def handle_event(self, event):
@@ -1215,18 +1447,23 @@ class Game:
 
     # ------------------------------------------------------------ update
     def update(self, dt):
-        if self.hitstop > 0.0:                 # freeze-frame sa impact
+        if self.hitstop > 0.0:                       # freeze-frame on contact: the hit has weight
             self.hitstop = max(0.0, self.hitstop - dt)
             return
         self.t += dt
         if self.smash_t is not None:
+            prev = self.smash_t
             self.smash_t += dt
             if not self.sfx_done and self.smash_t >= T_IMPACT:
                 self.sfx_done = True
                 play("smash")
-                self.hitstop = SMASH_HITSTOP
-                for cxx in (HALF // 2, HALF + HALF // 2):
-                    dust_burst(cxx, HANDS_TOP + 18, 18)
+                play("twang")
+                self.hitstop = IMPACT_HITSTOP
+                self._impact_burst()
+            for k, t_land in enumerate(BAND_LAND_TIMES):         # puff every time it lands again
+                if prev < t_land <= self.smash_t:
+                    self._landing_burst(k)
+        self._step_fx(dt)
 
         if self.phase == "meter":
             self.bot.update_meter(dt)
@@ -1240,7 +1477,7 @@ class Game:
                         b.lock()
             if self.t > METER_TIMEOUT:                   # time is up: auto stop
                 if self.pvp:
-                    self.bot.lock()
+                    self.bot.lock()                      # P1 din
                 self.player.lock()
 
             if self.bot.locked and self.player.locked:
@@ -1256,7 +1493,7 @@ class Game:
                 self.set_phase("smash")
 
         elif self.phase == "smash":
-            if self.t >= T_IMPACT + BAND_TIME + 0.3:
+            if self.t >= T_IMPACT + BAND_TIME + 0.45:
                 self.finish_turn()
 
         elif self.phase == "result":
@@ -1321,29 +1558,43 @@ class Game:
         return "tie"
 
     # ------------------------------------------------------------ drawing
+    def peak_scale(self, side):
+        """how big the hands get at the moment of impact (stronger meter = closer to the camera)"""
+        full = clamp((HANDS_TOP + HANDS_H - STRIKE_FULL_TIP) / HANDS_H, 1.25, 1.45)
+        return lerp(STRIKE_MIN, full, side.power)
+
     def hand_pose(self, side, st=None):
-        """returns (y_offset, scale, x_jitter) for the hands"""
+        """returns (y_offset, scale_x, scale_y, x_jitter). The whole hands+arms picture is
+        scaled up from the bottom edge of the screen, so the fingertips travel up while the
+        forearms stay planted. The 5 beats: wind-up -> slam -> squash -> rebound -> rest."""
         st = self.smash_t if st is None else st
         if st is None:
             jitter = 0
             bob = 0
             if self.phase == "timer":                 # tension: tiny shake while waiting
-                jitter = random.uniform(-2, 2)
+                jitter = random.uniform(-2.5, 2.5)
             elif self.phase in ("meter", "lock"):     # gentle idle bob so the hands feel alive
                 bob = 3 * math.sin(self.t * 6)
-            return bob, 1.0, jitter
-        strike = 45 + 50 * side.power                 # gaano kalakas ang bagsak
-        lift = 55 + 25 * side.power                   # gaano kataas ang pag-angat
-        if st < 0.16:                                 # 1) AANGAT: itinaas ang kamay
-            k = ease_out(st / 0.16)
-            return -lift * k, 1.0 + 0.08 * k, 0
-        if st < T_IMPACT:                             # 2) SMASH: babagsak nang mabilis
-            k = ((st - 0.16) / (T_IMPACT - 0.16)) ** 1.6
-            return -lift + (lift + strike * 0.25) * k, 1.08 - 0.18 * k, 0
-        if st < 0.70:                                 # 3) recover: bahagyang rebound
-            k = ease_in_out((st - T_IMPACT) / (0.70 - T_IMPACT))
-            return strike * 0.25 * (1 - k), 0.90 + 0.10 * k, 0
-        return 0, 1.0, 0
+            return bob, 1.0, 1.0, jitter
+        peak = self.peak_scale(side)
+        if st < T_GROW0:                              # 1) wind-up: hands pull back a little
+            k = ease_out(clamp(st / T_GROW0))
+            return 16.0 * k, 1.0 - 0.045 * k, 1.0 + 0.025 * k, 0
+        if st < T_IMPACT:                             # 2) the slam: accelerating (ease-in)
+            k = clamp((st - T_GROW0) / (T_IMPACT - T_GROW0)) ** 2.1
+            scx = lerp(0.955, peak * 1.02, k)
+            scy = lerp(1.025, peak * 0.985, k)
+            return lerp(16.0, 0.0, k), scx, scy, 0
+        if st < T_IMPACT + T_SQUASH:                  # 3) squash: the palm flattens on the floor
+            k = (st - T_IMPACT) / T_SQUASH
+            sq = math.sin(k * math.pi) * 0.06
+            return 5.0 * (1.0 - k), peak * (1.0 + sq), peak * (1.0 - sq * 1.7), 0
+        if st < T_IMPACT + T_SQUASH + T_RECOIL:       # 4) damped spring back to rest
+            k = clamp((st - T_IMPACT - T_SQUASH) / T_RECOIL)
+            wob = math.exp(-4.0 * k) * math.cos(k * math.pi * 2.2)
+            sc = 1.0 + (peak - 1.0) * wob
+            return 0, sc, sc, 0
+        return 0, 1.0, 1.0, 0
 
     def travel(self, side):
         """total distance (px) this side's bands have flown, including earlier rounds"""
@@ -1386,21 +1637,148 @@ class Game:
             label = "PERFECT!" if perfect else f"POWER {int(side.power * 100)}%"
             color = GOLD if perfect else TEXT_COLOR
             text_center(SMALL_FONT, label, color, (cx, METER_Y + 30), surf, shadow=True)
-        elif self.phase == "meter" and (is_player or self.pvp):
-            col = GOLD if int(self.t * 3) % 2 == 0 else TEXT_COLOR
+        elif self.phase == "meter" and not side.locked:
             if self.pvp:
                 hint = "[ P ]  stop on the white" if is_player else "[ Q ]  stop on the white"
-            else:
+            elif is_player:
                 hint = "[ SPACE ]  stop on the white"
-            text_center(SMALL_FONT, hint, col, (cx, METER_Y + 30), surf, shadow=True)
+            else:
+                hint = ""
+            if hint:
+                col = GOLD if int(self.t * 3) % 2 == 0 else TEXT_COLOR
+                text_center(SMALL_FONT, hint, col, (cx, METER_Y + 30), surf, shadow=True)
+
+    def band_state(self, side):
+        """where the pile is right now: (distance, ground y, launch progress u, hop height, hop 0..1)"""
+        st = self.smash_t
+        D = self.travel(side)
+        scroll = max(0.0, D - FOLLOW_AT)
+        ground = BAND_START_Y - D + scroll                  # y of the pile while it sits on the floor
+        u = 0.0 if st is None or st < T_IMPACT else clamp((st - T_IMPACT) / BAND_TIME)
+        h, peak = band_hop(u, side.power)
+        return D, ground, u, h, (h / peak if peak > 1.0 else 0.0)
+
+    def draw_impact_ring(self, surf, cx, power, k):
+        """white flash + expanding dust ring on the floor where the palm lands"""
+        cy = BAND_START_Y + 14
+        if k < 0.22:                                        # the flash of the hit
+            a = int(150 * (1.0 - k / 0.22))
+            flash = pygame.Surface((126, 48), pygame.SRCALPHA)
+            pygame.draw.ellipse(flash, (255, 252, 232, a), flash.get_rect())
+            surf.blit(flash, flash.get_rect(center=(cx, cy - 4)))
+        rw = int(26 + (115 + 65 * power) * ease_out(k))
+        rh = int(rw * 0.38)
+        ring = pygame.Surface((rw * 2 + 8, rh * 2 + 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(ring, (255, 246, 214, int(175 * (1.0 - k) ** 1.5)),
+                            (4, 4, rw * 2, rh * 2), max(2, int(7 * (1.0 - k) + 1)))
+        surf.blit(ring, ring.get_rect(center=(cx, cy)))
+
+    def draw_hands(self, surf, side, cx):
+        """the palms: scaled from the bottom edge, with the slam squash and a motion smear"""
+        off, scx, scy, jx = self.hand_pose(side)
+        hw = max(2, int(HANDS_TOP_IMG.get_width() * scx))
+        hh = max(2, int(HANDS_TOP_IMG.get_height() * scy))
+        top = HANDS_TOP_IMG if (hw, hh) == HANDS_TOP_IMG.get_size() else \
+            pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh))
+        shad = HANDS_TOP_SHADOW if (hw, hh) == HANDS_TOP_SHADOW.get_size() else \
+            pygame.transform.smoothscale(HANDS_TOP_SHADOW, (hw, hh))
+        y = HANDS_TOP + HANDS_H - HANDS_H * scy + off
+        wrist_y = int(y + hh - 1)
+        arm_h = max(int(HANDS_ARMS_IMG.get_height() * scy), HEIGHT + 8 - wrist_y)
+        arms = HANDS_ARMS_IMG if (hw, arm_h) == HANDS_ARMS_IMG.get_size() else \
+            pygame.transform.smoothscale(HANDS_ARMS_IMG, (hw, arm_h))
+        arm_shad = HANDS_ARMS_SHADOW if (hw, arm_h) == HANDS_ARMS_SHADOW.get_size() else \
+            pygame.transform.smoothscale(HANDS_ARMS_SHADOW, (hw, arm_h))
+        hx = int(cx + jx - hw // 2)
+
+        surf.blit(arm_shad, (hx + 14, wrist_y + 10))         # forearm shadow
+        surf.blit(shad, (hx + 14, int(y) + 10))              # hand shadow
+
+        # motion smear while the hands are still rushing forward (2 ghost frames)
+        st = self.smash_t
+        if st is not None and T_GROW0 <= st < T_IMPACT:
+            for back, a in ((0.022, 80), (0.046, 45)):
+                o2, _, y2, _ = self.hand_pose(side, st - back)
+                hh2 = max(2, int(HANDS_TOP_IMG.get_height() * y2))
+                gh = HANDS_TOP_IMG if hh2 == HANDS_TOP_IMG.get_height() else \
+                    pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh2))
+                gh = gh.copy()
+                gh.set_alpha(a)
+                surf.blit(gh, (hx, int(HANDS_TOP + HANDS_H - HANDS_H * y2 + o2)))
+
+        surf.blit(arms, (hx, wrist_y))
+        surf.blit(top, (hx, int(y)))
+
+    def draw_bands(self, surf, side, cx, is_player):
+        """the pile: every ring scatters, tumbles, stretches and bounces on its own"""
+        D, ground, u, hop, norm = self.band_state(side)
+        persp = 1.0 - 0.16 * clamp(D / FINISH_DIST)          # lumiit habang lumalayo (depth)
+        st = self.smash_t
+
+        # elastic deformation: pressed flat under the palm, stretched as it leaves the hand
+        h2, _ = band_hop(min(1.0, u + 0.012), side.power)
+        speed = abs(h2 - hop) / (0.012 * BAND_TIME)          # px per second
+        stretch = clamp(speed / 620.0) * BAND_STRETCH
+        press = 0.0
+        if st is not None and T_IMPACT <= st < T_IMPACT + 0.06:
+            press = 1.0 - (st - T_IMPACT) / 0.06
+        sx = (1.0 + 0.40 * press) * (1.0 - 0.40 * stretch)
+        sy = (1.0 - 0.45 * press) * (1.0 + stretch)
+
+        ue = clamp(u / BAND_LAND_FRACS[-1]) if BAND_LAND_FRACS else 1.0
+        fx = self.ring_fx["player" if is_player else "bot"]
+
+        items = []
+        for i, (ring, (ox, oy)) in enumerate(BAND_RINGS):
+            f = fx[i % len(fx)]
+            img = ring
+            w = int(img.get_width() * persp * sx)
+            h = int(img.get_height() * persp * sy)
+            if (w, h) != img.get_size():
+                img = pygame.transform.smoothscale(img, (max(4, w), max(4, h)))
+            ang = f["spin"] * ease_out(ue)                   # tumbling in the air
+            if abs(ang) > 1.0:
+                img = pygame.transform.rotate(img, ang)
+
+            # sideways scatter: they slide apart once and STAY apart (a flick pushes them out)
+            drift = ease_out(clamp(u / 0.40))
+            rx = cx + ox + f["dx"] * f["spread"] * drift
+            ry = ground + oy - hop * f["hop"]                # every ring jumps a little differently
+            gy = ground + oy
+
+            sh_scale = persp * (1.0 - 0.45 * norm) * f["shrink"]
+            base = BAND_RING_SHADOWS[i]
+            sw, shh = int(base.get_width() * sh_scale), int(base.get_height() * sh_scale)
+            sh = base if (sw, shh) == base.get_size() else \
+                pygame.transform.smoothscale(base, (max(3, sw), max(2, shh)))
+            items.append((ry, gy, img, sh, int(rx)))
+
+        # shadows stay on the floor and shrink while the ring is in the air
+        if norm <= 0.02:                                    # resting: one soft contact shadow
+            ps = PILE_SHADOW if abs(persp - 1.0) < 0.01 else pygame.transform.smoothscale(
+                PILE_SHADOW, (max(6, int(PILE_SHADOW.get_width() * persp)),
+                              max(4, int(PILE_SHADOW.get_height() * persp))))
+            surf.blit(ps, ps.get_rect(center=(cx + 4, ground + 22)))
+        else:
+            for ry, gy, img, sh, rx in items:
+                sh.set_alpha(int(115 * (1.0 - 0.55 * norm)))
+                surf.blit(sh, sh.get_rect(center=(rx + 5, gy + 5)))
+                sh.set_alpha(255)
+
+        # the rings themselves, far ones first so the overlaps look right
+        for ry, gy, img, sh, rx in sorted(items, key=lambda it: it[0]):
+            if stretch > 0.10:                               # motion smear while it is fast
+                ghost = img.copy()
+                ghost.set_alpha(int(85 * stretch))
+                surf.blit(ghost, ghost.get_rect(center=(rx, int(ry + 26 * stretch))))
+            surf.blit(img, img.get_rect(center=(rx, int(ry))))
 
     def draw_side(self, side, surf, is_player):
         cx = HALF // 2
-        D = self.travel(side)
+        D = self.band_state(side)[0]
         scroll = max(0.0, D - FOLLOW_AT)                         # floor moves down as the bands go far
         st = self.smash_t
         moving = st is not None and T_IMPACT <= st < T_IMPACT + BAND_TIME
-        u_move = clamp((st - T_IMPACT) / BAND_TIME) if moving else 1.0
 
         # the floor is a tall image repeated (every 2nd copy flipped so the seams line up)
         for k in range(int(scroll // BG_H), int((HEIGHT + scroll) // BG_H) + 1):
@@ -1424,7 +1802,7 @@ class Game:
             text_center(SMALL_FONT, "FINISH", TEXT_COLOR, (cx, fy + 26), surf, shadow=True)
 
         # progress bar towards the finish line
-        bar = pygame.Rect(14, 110, 12, 440)
+        bar = pygame.Rect(HALF - 26 if is_player else 14, 110, 12, 440)
         pygame.draw.rect(surf, (20, 20, 20), bar.inflate(4, 4), border_radius=8)
         fill = int(bar.height * clamp(D / FINISH_DIST))
         pygame.draw.rect(surf, (255, 220, 90), (bar.x, bar.bottom - fill, bar.width, fill), border_radius=6)
@@ -1432,75 +1810,23 @@ class Game:
         if st is not None and st > T_IMPACT + BAND_TIME and side.base + side.dist >= FINISH_DIST:
             text_center(BIG_FONT, "FINISHED!", GOLD, (cx, 125), surf, shadow=True)
 
-        # ---- hands + arms (rigid ang braso - hindi nagiging lastiko) ----
-        off, sc, jx = self.hand_pose(side)
-        hw = HANDS_TOP_IMG.get_width()
-        hh = max(2, int(HANDS_TOP_IMG.get_height() * sc))
-        top = HANDS_TOP_IMG if hh == HANDS_TOP_IMG.get_height() else \
-            pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh))
-        shad = HANDS_TOP_SHADOW if hh == HANDS_TOP_SHADOW.get_height() else \
-            pygame.transform.smoothscale(HANDS_TOP_SHADOW, (hw, hh))
-        y = int(HANDS_TOP + off)
-        wrist_y = y + hh - 1
-        hx = int(cx + jx - hw // 2)
-        strike_off = 45 + 50 * side.power                        # lakas ng bagsak (para sa ring)
+        # ---- impact shockwave on the floor (under the palms) ----
+        if st is not None and T_IMPACT <= st < T_IMPACT + 0.34:
+            self.draw_impact_ring(surf, cx, side.power, (st - T_IMPACT) / 0.34)
 
-        surf.blit(shad, (hx + 14, y + 10))                       # soft drop shadow on the floor
+        # ---- hands + flying bands (correct layering) ----
+        if st is not None and T_IMPACT <= st < T_IMPACT + 0.12:
+            self.draw_bands(surf, side, cx, is_player)       # palm still pressing: hand on top
+            self.draw_hands(surf, side, cx)
+        elif st is not None and st >= T_IMPACT + 0.12:
+            self.draw_hands(surf, side, cx)                  # rings in the air stay visible
+            self.draw_bands(surf, side, cx, is_player)
+        else:
+            self.draw_bands(surf, side, cx, is_player)       # resting pile sits behind the palms
+            self.draw_hands(surf, side, cx)
 
-        # impact shockwave: ellipse sa SAHIG na lumalabas sa ilalim ng palad
-        if st is not None and T_IMPACT <= st < T_IMPACT + 0.32:
-            k = (st - T_IMPACT) / 0.32
-            rw = int(40 + 190 * ease_out(k))
-            rh = int(rw * 0.42)
-            ring = pygame.Surface((rw * 2 + 10, rh * 2 + 10), pygame.SRCALPHA)
-            pygame.draw.ellipse(ring, (255, 255, 255, int(185 * (1 - k))),
-                                (5, 5, rw * 2, rh * 2), 4)
-            surf.blit(ring, ring.get_rect(center=(cx, HANDS_TOP + int(strike_off * 0.25) + 40)))
-
-        surf.blit(HANDS_ARMS_IMG, (hx, wrist_y))                 # braso: hindi ini-stretch
-
-        # motion smear habang pabagsak ang kamay (dalawang ghost sa likod)
-        if st is not None and 0.16 <= st < T_IMPACT:
-            for back, a in ((0.020, 85), (0.040, 45)):
-                o2, s2, _ = self.hand_pose(side, st - back)
-                hh2 = max(2, int(HANDS_TOP_IMG.get_height() * s2))
-                ghost = HANDS_TOP_IMG if hh2 == HANDS_TOP_IMG.get_height() else \
-                    pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh2))
-                ghost = ghost.copy()
-                ghost.set_alpha(a)
-                surf.blit(ghost, (hx, int(HANDS_TOP + o2)))
-
-        surf.blit(top, (hx, y))
-
-        # ---- rubber bands: iginuhit PAGKATAPOS ng kamay para hindi mawala sa palad ----
-        # (dati bago ang kamay, kaya natatakpan ito ng palad sa unang hampas)
-        by = BAND_START_Y - D + scroll
-        hop = stretch = squash = 0.0
-        ang = 0.0
-        if moving:
-            hop = 42 * 4 * u_move * (1 - u_move) ** 2              # talbog pataas pag na-hampas
-            if u_move < 0.18:
-                stretch = 0.32 * (1 - u_move / 0.18)               # pahaba sa launch
-            elif u_move > 0.86:
-                squash = 0.20 * ((u_move - 0.86) / 0.14)           # pipi sa landing
-            ang = math.sin(u_move * math.pi * 1.5) * 7             # konting ikot habang tumatalsik
-        sway = math.sin(st * 18) * 5 * (1 - u_move) if moving else 0
-        bx = cx + sway
-        persp = 1.0 - 0.14 * clamp(D / FINISH_DIST)                # lumiit habang lumalayo (3D feel)
-
-        # shadow: lumiit habang tumataas at lumalayo
-        sh_sc = persp * clamp(1.0 - hop / 80.0, 0.6, 1.0)
-        sh = pygame.transform.smoothscale(
-            BAND_SHADOW, (max(2, int(BAND_SHADOW.get_width() * sh_sc)),
-                          max(2, int(BAND_SHADOW.get_height() * sh_sc))))
-        surf.blit(sh, sh.get_rect(center=(bx + 6, by + int(BANDS.get_height() * persp * 0.5) + 4)))
-
-        bw = max(2, int(BANDS.get_width() * persp * (1 - 0.45 * stretch + 0.35 * squash)))
-        bh = max(2, int(BANDS.get_height() * persp * (1 + stretch - squash)))
-        img = BANDS if (bw, bh) == BANDS.get_size() else pygame.transform.scale(BANDS, (bw, bh))
-        if ang:
-            img = pygame.transform.rotozoom(img, ang, 1.0)
-        surf.blit(img, img.get_rect(center=(int(bx), int(by - hop))))
+        # ---- alikabok + rubber crumbs (in front of everything) ----
+        self._draw_fx(surf, "player" if is_player else "bot")
 
         self.draw_meter(surf, side, cx, is_player)
 
@@ -1508,10 +1834,13 @@ class Game:
         p = self.phase
         if p == "meter":
             if self.pvp:
-                left = "" if self.bot.locked else "P1: Q"
-                right = "" if self.player.locked else "P2: P"
-                todo = "  ".join(x for x in (left, right) if x)
-                return f"SMASH {self.turn}: {todo}" if todo else "LOCKED IN!"
+                if not self.bot.locked and not self.player.locked:
+                    return f"SMASH {self.turn}: P1 [Q]  /  P2 [P]!"
+                if self.bot.locked and not self.player.locked:
+                    return "WAITING FOR PLAYER 2..."
+                if self.player.locked and not self.bot.locked:
+                    return "WAITING FOR PLAYER 1..."
+                return "BOTH LOCKED IN!"
             return f"SMASH {self.turn}: PRESS SPACE!" if not self.player.locked else "WAITING FOR BOT..."
         if p == "lock":
             return "LOCKED IN!"
@@ -1534,35 +1863,21 @@ class Game:
             WIN.blit(surf, (ox + sx, sy))
         pygame.draw.line(WIN, (15, 15, 15), (HALF, 0), (HALF, HEIGHT), 3)
 
-        # ===== ROUND WINS LABELS (3px gap lang) =====
+        # ===== NEW HUD (gold pills, same layout as the reference image) =====
+        n = min(self.round, ROUNDS)
+        # left = BOT, right = PLAYER
+        hud_pill(WIN, HUD_L_LABEL, "P1 WINS" if self.pvp else "ROUND WINS")
+        hud_pill(WIN, pygame.Rect(HUD_L_VALUE.right - 140, HUD_L_VALUE.y, 140, 34), f"SCORE:{self.bot_wins}")
+        hud_pill(WIN, HUD_ROUND, f"ROUND {n}", TITLE_FONT)
+        hud_pill(WIN, HUD_R_LABEL, "P2 WINS" if self.pvp else "ROUND WINS")
+        hud_pill(WIN, pygame.Rect(HUD_R_VALUE.x, HUD_R_VALUE.y, 140, 34), f"SCORE:{self.player_wins}")
 
-        # ---- LEFT SIDE (PLAYER 1 / BOT) ----
-        bot_label = pygame.Rect(WIDTH // 2 - 273, 10, 140, 30)
-        hud_box(WIN, bot_label)
-        text_center(SMALL_FONT, "P1 WINS" if self.pvp else "ROUND WINS", TEXT_COLOR,
-                    bot_label.center, shadow=True)
-
-        bot_score = pygame.Rect(WIDTH // 2 - 223, 45, 90, 45)
-        hud_box(WIN, bot_score)
-        text_center(BIG_FONT, str(self.bot_wins), TEXT_COLOR, bot_score.center, shadow=True)
-
-        # ---- CENTER ----
-        center_box = pygame.Rect(WIDTH // 2 - 130, 10, 260, 80)
-        hud_box(WIN, center_box)
-        text_center(BIG_FONT, f"ROUND {min(self.round, ROUNDS)}", TEXT_COLOR,
-                    (center_box.centerx, center_box.y + 28), shadow=True)
-        text_center(DESC_FONT, self.hud_message(), TEXT_COLOR,
-                    (center_box.centerx, center_box.y + 58), shadow=True)
-
-        # ---- RIGHT SIDE (PLAYER 2 / PLAYER) ----
-        player_label = pygame.Rect(WIDTH // 2 + 133, 10, 140, 30)
-        hud_box(WIN, player_label)
-        text_center(SMALL_FONT, "P2 WINS" if self.pvp else "ROUND WINS", TEXT_COLOR,
-                    player_label.center, shadow=True)
-
-        player_score = pygame.Rect(WIDTH // 2 + 133, 45, 90, 45)
-        hud_box(WIN, player_score)
-        text_center(BIG_FONT, str(self.player_wins), TEXT_COLOR, player_score.center, shadow=True)
+        # timer pill (the pink-circle spot under the ROUND pill)
+        timer_txt = ""
+        if self.phase == "meter" and not self.player.locked:
+            timer_txt = f"TIME: {int(math.ceil(max(0.0, METER_TIMEOUT - self.t)))}"
+        hud_pill(WIN, HUD_TIMER, timer_txt)
+        text_center(SMALL_FONT, self.hud_message(), TEXT_COLOR, (WIDTH // 2, 172), shadow=True)
 
         # ---- friendly pop-up messages ----
         if self.phase == "meter" and self.turn == 1 and self.t < 1.0:
@@ -1601,7 +1916,7 @@ class Game:
         button(END_MENU, "MENU", END_MENU.collidepoint(mouse), MID_FONT)
 
 
-CX, CY = WIDTH // 2, 300            # center of the floor where the pogs sit
+CX, CY = WIDTH // 2, 325            # center of the floor where the pogs sit (lower = palm can swallow the pile)
 
 STACK_MIN, STACK_MAX = 15, 30       # every game starts with a different random stack (15 to 30 pogs)
 MAX_STACK = STACK_MAX               # the stack can never be bigger than this
@@ -1610,17 +1925,24 @@ TURN_TIME = 5.0                     # seconds each player has to stop the meter
 POG_D = 72                          # pog size on screen (px)
 POG_FILES = ["pog1.png", "pog2.png", "pog3.png", "pog4.png"]   # every pog in the stack gets one of these
 
-POGS_T_IMPACT = 0.30                # moment the hands hit the floor (smash phase)
-SMASH_TIME = 0.85
+# hand slam timing (same shape as the reference video: still -> grow toward the camera -> hold -> snap back)
+POGS_T_GROW0 = 0.13                 # hands start moving (smash phase) - same as Karera
+POGS_T_IMPACT = 0.55                # moment the hands hit the pogs (end of the grow)
+POGS_T_HOLD = 0.12                  # hands stay pressed down
+POGS_T_SNAP = 0.06                  # then snap back to the resting size
+SMASH_TIME = 0.95
 LOCK_TIME = 0.55
-FLIGHT_TIME = 1.15                  # how long the flipped pogs take to scatter (kasama na ang bounce)
+FLIGHT_TIME = 1.35                  # how long the flipped pogs take to scatter
+POG_FLIGHT_T = (0.42, 0.62)         # airtime of the first arc (seconds) - mabilis ang hampas
+POG_PEAK = (80, 150)                # apex height of the first arc (px) - mas mataas = mas "talsik"
+POG_BOUNCES = [(0.34, 0.50), (0.20, 0.22), (0.11, 0.07)]   # (airtime frac, bounce height frac)
+POG_SLIDE_T = 0.24                  # huling pag-skid sa sahig bago tumigil
 COLLECT_TIME = 0.75
-HITSTOP = 0.065                     # freeze-frame sa impact - pakiramdam ng bigat
 TRANS_TIME = 1.5                    # turn-change transition
 HIDE = 430                          # how far the hands slide down when hidden
 REST_TOP = 430                      # y of the fingertips when resting
 HAND_W = 280
-HAND_X = {"player": CX - 95, "bot": CX + 95}
+HAND_X = {"player": CX, "bot": CX}  # both hands sit in the middle-bottom
 
 IDEAL_LO, IDEAL_HI = 0.80, 0.90     # the "sweet spot" of the power meter
 
@@ -1651,6 +1973,99 @@ def strike_name(p):
     if p <= 0.95:
         return "POWERFUL STRIKE"
     return "OVERCHARGE!"
+
+
+# ---------------------------------------------------------------------
+#  POG FLIGHT KINEMATICS
+#  Isang pog = isang projectile. Unang bugso (buong layo, pinakamataas),
+#  tapos paunti nang paunti ang talbog hanggang tumigil sa sahig.
+# ---------------------------------------------------------------------
+POG_BOUNCE_DAMP = 0.55          # bawat talbog, bumabagal ang takbo sa sahig
+
+def pog_tail_factor(T):
+    """exact na layo ng bounces + skid pagkatapos ng unang arc,
+    bilang fraction ng unang arc. Nakadepende ito sa flight time T."""
+    v = 1.0
+    s = 0.0
+    for d, _h in POG_BOUNCES:
+        s += d * v
+        v *= POG_BOUNCE_DAMP
+    return s + (POG_SLIDE_T / max(1e-6, T)) * v
+
+HAND_KEEPOUT = pygame.Rect(CX - 205, CY + 15, 410, HEIGHT)   # huwag patungo dito ang mga pog
+
+
+def _out_of_hands(x, y):
+    """ilayo ang landing spot sa mga kamay/braso (nasa foreground kasi ang kamay)"""
+    r = HAND_KEEPOUT
+    if not r.collidepoint(x, y):
+        return x, y
+    if y < r.top + 55:                       # malapit sa itaas: itaas na lang
+        return x, r.top - 44
+    if x < CX:                               # gilid: itulak sa kaliwa
+        return r.left - 46, y
+    return r.right + 46, y                   # o sa kanan
+
+
+def pog_depth(gy):
+    """mas malayo sa camera (mas mataas sa screen) = mas maliit nang kaunti"""
+    return 1.0 - 0.10 * clamp((CY - gy) / 280.0, 0.0, 1.0)
+
+
+def _pog_segments(p):
+    """yield (t_start, t_end, x0, y0, x1, y1, height, angle0, angle1, skid) per arc.
+    Isang arc = isang talbog. Ang huling 'skid' ay hindi na tumatalbog - dumudulas
+    lang sa sahig habang bumabagal (friction) bago tumigil."""
+    T = p["T"]
+    sx, sy, ex, ey = p["sx"], p["sy"], p["ex"], p["ey"]
+    vx, vy = (ex - sx) / T, (ey - sy) / T        # px per second sa sahig
+    ang = p["spin"]
+    t0 = 0.0
+    # 1) unang bugso: buong layo, pinakamataas na arc, mabilis na pag-flip
+    yield t0, T, sx, sy, ex, ey, p["peak"], 0.0, ang, False
+    t0 = T
+    cx, cy = ex, ey
+    for dur_f, h_f in POG_BOUNCES:
+        bt = T * dur_f
+        nx, ny = cx + vx * bt, cy + vy * bt
+        # nakalapat na pagkatapos ng unang flip: hindi na umiikot sa ere,
+        # ang design na lang ang umiikot (parang totoong pog na dumudulas)
+        yield t0, t0 + bt, cx, cy, nx, ny, p["peak"] * h_f, ang, ang, False
+        t0 += bt
+        cx, cy = nx, ny
+        vx *= POG_BOUNCE_DAMP
+        vy *= POG_BOUNCE_DAMP
+    # 4) huling skid: friction ang pumipigil, paunti nang paunti ang bilis
+    nx, ny = cx + vx * POG_SLIDE_T, cy + vy * POG_SLIDE_T
+    yield t0, t0 + POG_SLIDE_T, cx, cy, nx, ny, 0.0, ang, ang, True
+
+
+def pog_flight_at(p, t):
+    """(x, ground_y, z, angle, landed) ng isang lumilipad na pog sa oras t."""
+    t = t - p["delay"]
+    if t <= 0.0:
+        return p["sx"], p["sy"], 0.0, 0.0, False
+    for t0, t1, x0, y0, x1, y1, h, a0, a1, skid in _pog_segments(p):
+        if t < t1:
+            u = (t - t0) / max(1e-6, (t1 - t0))
+            if skid:                                # friction: mabilis sa simula, dahan-dahang hinto
+                u = 1.0 - (1.0 - u) ** 2.2
+            z = 4.0 * h * u * (1.0 - u) if not skid else 0.0
+            return (lerp(x0, x1, u),                     # horizontal: tuloy-tuloy
+                    lerp(y0, y1, u),                     # depth sa sahig
+                    z,                                   # height: parabola (gravity)
+                    lerp(a0, a1, u),                     # pag-ikot / pag-flip
+                    False)
+    rx, ry = p["rest"]
+    return rx, ry, 0.0, p["spin"], True
+
+
+def pog_rest_point(p):
+    """saan titigil ang pog pagkatapos ng lahat ng talbog at skid."""
+    last = None
+    for seg in _pog_segments(p):
+        last = seg
+    return last[4], last[5]
 
 
 def _load(name):
@@ -1684,7 +2099,16 @@ def _fit_square(img):
 
 def _extend_down(img, need):
     """make an arm picture taller WITHOUT stretching it: the bottom rows are repeated"""
-    return extend_down(img, need)
+    w, h = img.get_size()
+    out = pygame.Surface((w, need), pygame.SRCALPHA)
+    out.blit(img, (0, 0))
+    strip_h = max(1, min(8, h))
+    strip = img.subsurface((0, h - strip_h, w, strip_h)).copy()
+    y = h
+    while y < need:
+        out.blit(strip, (0, y))
+        y += strip_h
+    return out
 
 
 _ASSETS = {}
@@ -1817,9 +2241,10 @@ class Meter:
 
 
 class PogsGame:
-    def __init__(self, on_finish=None):
+    def __init__(self, on_finish=None, pvp=False):
         """on_finish(player_pogs, bot_pogs, mode_name) is called once when the game ends."""
         self.on_finish = on_finish
+        self.pvp = pvp              # True = Player 1 vs Player 2, False = Player vs Bot
         self.win = WIN
         self.A = _assets()
         self.f_hud = PixelFont(30)
@@ -1829,7 +2254,6 @@ class PogsGame:
         self.f_small = PixelFont(24)
         self.canvas = pygame.Surface((WIDTH, HEIGHT))
         self.fx = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        self._shadow_cache = {}
         rnd = random.Random(5)
         self.stack_off = [(rnd.randint(-3, 3), rnd.randint(-2, 2)) for _ in range(MAX_STACK)]
         self.reset()
@@ -1847,15 +2271,21 @@ class PogsGame:
         self.pen_sub = ""
         self.pen_color = WHITE
         self.round = 1
-        self.pogs = {"player": 0, "bot": 0}
-        self.last_flip = {"player": 0, "bot": 0}
-        self.turn = "player"            # the player always starts
+        if self.pvp:
+            self.pogs = {"player1": 0, "player2": 0}
+            self.last_flip = {"player1": 0, "player2": 0}
+            self.turn = "player1"            # Player 1 always starts
+        else:
+            self.pogs = {"player": 0, "bot": 0}
+            self.last_flip = {"player": 0, "bot": 0}
+            self.turn = "player"            # the player always starts
         self.prev = None
         self.flying = []
-        self.smoke = []
-        self.waves = []
+        self.waves = []          # only the little ring when a "HIT!" circle is clicked
+        self.puffs = []          # alikabok: impact + landing
+        self.hitstop = 0.0       # freeze-frame sa impact (ramdam ang bigat)
+        self.stack_shake = 0.0   # nginig ng pile pagkatapos ng hampas
         self.shake = 0.0
-        self.hitstop = 0.0
         self.power = 0.0
         self.msg = ""
         self.msg2 = ""
@@ -1872,23 +2302,32 @@ class PogsGame:
     def start_meter(self):
         sweep = max(0.22, 0.70 - 0.09 * (self.round - 1)) * POGS_SWEEP_MUL     # much faster, and faster every round
         self.meter = Meter(sweep)
-        self.bot_target = clamp(random.gauss(0.84, POGS_BOT_SPREAD), 0.05, 1.0)
-        self.bot_wait = random.uniform(0.8, 3.0)
+        if not self.pvp:
+            self.bot_target = clamp(random.gauss(0.84, POGS_BOT_SPREAD), 0.05, 1.0)
+            self.bot_wait = random.uniform(0.8, 3.0)
         self.impacted = False
         self.msg = self.msg2 = ""
         self.set_phase("meter")
 
-    # ---------------------------------------------------------- input
+# ---------------------------------------------------------- input
     def handle_event(self, event):
         if event.type == pygame.KEYDOWN:
             if event.key == pygame.K_ESCAPE:
                 return "menu"
-            if event.key == pygame.K_SPACE and self.phase == "meter" and self.turn == "player":
-                if not self.meter.locked:
+            if self.phase == "meter" and not self.meter.locked:
+                if self.pvp:
+                    # PvP: P1 = Q, P2 = P (same as Karera PvP controls)
+                    if event.key == pygame.K_q and self.turn == "player1":
+                        play("lock")
+                        self.meter.locked = True
+                    elif event.key == pygame.K_p and self.turn == "player2":
+                        play("lock")
+                        self.meter.locked = True
+                elif event.key == pygame.K_SPACE and self.turn == "player":
                     play("lock")
-                self.meter.locked = True
+                    self.meter.locked = True
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.phase == "target" \
-                and self.turn == "player":
+                and (self.turn == "player" or (self.pvp and self.turn in ("player1", "player2"))):
             self.click_target(event.pos)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.phase == "end":
             if END_AGAIN.collidepoint(event.pos):
@@ -1901,13 +2340,23 @@ class PogsGame:
 
     # ---------------------------------------------------------- update
     def update(self, dt):
-        if self.hitstop > 0.0:                 # freeze-frame: lahat nakahinto saglit
+        if self.hitstop > 0.0:                 # freeze-frame sa impact: ramdam ang bigat
             self.hitstop = max(0.0, self.hitstop - dt)
             return
+        if self.shake > 0.0:                   # unti-unting humihinto ang nginig
+            self.shake = max(0.0, self.shake - 26 * dt)
         self.t += dt
         self.update_fx(dt)
-        self.update_flying(dt)
+        self.update_puffs(dt)
+        self.update_pog_landings()
         ph = self.phase
+
+        # nginig ng pile pagkatapos ng hampas (damped oscillation)
+        if ph == "smash" and self.t >= POGS_T_IMPACT:
+            k = clamp((self.t - POGS_T_IMPACT) / 0.40)
+            self.stack_shake = 8.0 * (1.0 - k) * math.sin(k * 38.0)
+        else:
+            self.stack_shake = 0.0
 
         if ph == "transition":
             if self.t >= TRANS_TIME:
@@ -1916,7 +2365,7 @@ class PogsGame:
         elif ph == "meter":
             m = self.meter
             m.update(dt)
-            if self.turn == "bot" and not m.locked and self.t >= self.bot_wait:
+            if not self.pvp and self.turn == "bot" and not m.locked and self.t >= self.bot_wait:
                 if abs(m.pos - self.bot_target) < m.speed * dt * 1.5 + 0.02:
                     m.locked = True
             if self.t >= TURN_TIME:
@@ -1954,19 +2403,98 @@ class PogsGame:
                     self.finish()
                 else:
                     self.prev = self.turn
-                    self.turn = "bot" if self.turn == "player" else "player"
+                    if self.pvp:
+                        self.turn = "player2" if self.turn == "player1" else "player1"
+                    else:
+                        self.turn = "bot" if self.turn == "player" else "player"
                     if self.prev == "bot":
                         self.round += 1
                     self.set_phase("transition")
 
     def finish(self):
-        p, b = self.pogs["player"], self.pogs["bot"]
-        self.final = "win" if p > b else "loss" if p < b else "tie"
-        if not self.saved and self.on_finish:
-            self.on_finish(p, b, "DAMPA POGS")
+        if self.pvp:
+            p1, p2 = self.pogs["player1"], self.pogs["player2"]
+            self.final = "p1" if p1 > p2 else "p2" if p2 > p1 else "ptie"
+            if not self.saved and self.on_finish:
+                self.on_finish(p1, p2, "DAMPA POGS", result=self.final)
+        else:
+            p, b = self.pogs["player"], self.pogs["bot"]
+            self.final = "win" if p > b else "loss" if p < b else "tie"
+            if not self.saved and self.on_finish:
+                self.on_finish(p, b, "DAMPA POGS")
         self.saved = True
         self.set_phase("end")
         finish_fx(self.final)
+
+    # ---------------------------------------------------------- dust / alikabok
+    def _puff(self, x, y, n, power, spread=40, speed=1.0, life=(0.30, 0.70)):
+        """spawn dust particles (same recipe as Dampa Karera)"""
+        if n <= 0:
+            return
+        big = power >= 0.75
+        for _ in range(n):
+            a = random.uniform(-math.pi * 0.95, -math.pi * 0.05)
+            sp = random.uniform(22, 95) * speed * (0.7 + 0.7 * power)
+            self.puffs.append([
+                x + random.uniform(-spread, spread), y + random.uniform(-5, 9),
+                math.cos(a) * sp, math.sin(a) * sp * 0.5,
+                random.choice((14, 20, 27)) if big else random.choice((9, 14, 20)),
+                0.0, random.uniform(*life)])
+
+    def update_puffs(self, dt):
+        for p in self.puffs:
+            p[0] += p[2] * dt
+            p[1] += p[3] * dt
+            p[2] *= 0.90
+            p[3] = p[3] * 0.90 - 26 * dt              # dust floats up then hangs in the air
+            p[5] += dt
+        self.puffs[:] = [p for p in self.puffs if p[5] < p[6]]
+
+    def draw_puffs(self, surf):
+        for x, y, vx, vy, r, age, life in self.puffs:
+            k = clamp(age / life)
+            puff = DUST_PUFFS[r]
+            puff.set_alpha(int(215 * (1.0 - k) ** 0.9))
+            surf.blit(puff, puff.get_rect(center=(int(x), int(y))))
+            puff.set_alpha(255)
+
+    def draw_impact_ring(self, surf, cx, cy, power, k):
+        """white flash + expanding dust ring sa sahig kung saan lumapat ang palad"""
+        if k < 0.0 or k > 1.0:
+            return
+        if k < 0.22:                                        # the flash of the hit
+            a = int(150 * (1.0 - k / 0.22))
+            flash = pygame.Surface((150, 60), pygame.SRCALPHA)
+            pygame.draw.ellipse(flash, (255, 252, 232, a), flash.get_rect())
+            surf.blit(flash, flash.get_rect(center=(cx, cy - 4)))
+        rw = int(30 + (130 + 80 * power) * ease_out(k))
+        rh = int(rw * 0.38)
+        ring = pygame.Surface((rw * 2 + 8, rh * 2 + 8), pygame.SRCALPHA)
+        pygame.draw.ellipse(ring, (255, 246, 214, int(175 * (1.0 - k) ** 1.5)),
+                            (4, 4, rw * 2, rh * 2), max(2, int(7 * (1.0 - k) + 1)))
+        surf.blit(ring, ring.get_rect(center=(cx, cy)))
+
+    def update_pog_landings(self):
+        """bawat pog na lumapat sa sahig -> maliit na alikabok (isa-isa, bawat talbog)"""
+        if self.phase == "smash":
+            ft = max(0.0, self.t - POGS_T_IMPACT)
+        elif self.phase == "flip":
+            ft = (SMASH_TIME - POGS_T_IMPACT) + self.t
+        else:
+            return
+        for p in self.flying:
+            t = ft - p["delay"]
+            if t <= 0.0:
+                continue
+            events = p.get("land_events") or []
+            while p.get("bounce_fx", 0) < len(events) and t >= events[p["bounce_fx"]][0]:
+                i = p["bounce_fx"]
+                _, lx, ly = events[i]
+                strong = 1.0 if i == 0 else (0.45 if i == 1 else 0.25)
+                self._puff(lx, ly, 4 if i == 0 else 2, self.power * strong,
+                           spread=16, speed=0.55 if i == 0 else 0.35,
+                           life=(0.18, 0.42) if i == 0 else (0.14, 0.30))
+                p["bounce_fx"] = i + 1
 
     # ---------------------------------------------------------- the smash
     def do_impact(self):
@@ -1988,60 +2516,97 @@ class PogsGame:
         self.msg = strike_name(p)
         self.msg2 = f"{flips} POG{'S' if flips != 1 else ''} FLIPPED!" if flips else "NO POGS FLIPPED..."
 
-        # flying pogs - tunay na parabola + bounce sa landing
+        # flying pogs - real projectile motion: launch -> arc -> bounce -> skid -> settle
         self.flying = []
-        spread = 1.35 if p > 0.95 else 1.0
-        placed = []
+        spread = 1.25 if p > 0.95 else 1.0
         for k in range(flips):
-            # humanap ng landing spot na hindi gaano nakapatong sa ibang pog
-            ex = ey = 0.0
-            for _try in range(24):
-                ang = random.uniform(0, math.tau)
-                rad = random.uniform(0.28, 1.0)
-                ex = clamp(CX + math.cos(ang) * 300 * rad * spread, 330, 970)
-                ey = clamp(CY + math.sin(ang) * 175 * rad * spread, 140, 450)
-                if all((ex - ox) ** 2 + (ey - oy) ** 2 > 46 * 46 for ox, oy in placed):
-                    break
-            placed.append((ex, ey))
-
-            dist = math.hypot(ex - CX, ey - CY)
-            dur = 0.52 + 0.42 * (dist / 340.0) + random.uniform(0.0, 0.05)   # malayo = mas matagal
-            delay = random.uniform(0.0, 0.20)                                # staggered ang launch
-            self.flying.append({
-                "start": (CX + random.uniform(-16, 16), CY + random.uniform(-14, 6)),
-                "end": (ex, ey),
-                "delay": delay,
-                "dur": dur,
-                "arc": (20 + 0.15 * dist) * (0.70 + 0.30 * p),               # mababa lang: tumatalbog sa sahig
+            ang = random.uniform(0, math.tau)
+            rad = random.uniform(0.0, 1.0) ** 1.2
+            travel = (110 + 440 * rad) * spread             # layo ng final resting spot
+            if random.random() < 0.22:                      # ilang pog, malapit lang tumalbog
+                travel *= random.uniform(0.30, 0.55)
+            rx = clamp(CX + math.cos(ang) * travel, 255, 1045)
+            ry = clamp(CY + math.sin(ang) * travel * 0.62, 110, 495)
+            rx, ry = _out_of_hands(rx, ry)                  # huwag sa ibabaw ng kamay
+            T = random.uniform(*POG_FLIGHT_T)
+            sx = CX + random.uniform(-5, 5)                 # tunay na simula (may jitter)
+            sy = CY - random.uniform(0, 10)
+            K = 1.0 + pog_tail_factor(T)                    # exact: rest = start + (ex-start)*K
+            ex = clamp(sx + (rx - sx) / K, 230, 1070)       # dulo ng unang arc
+            ey = clamp(sy + (ry - sy) / K, 95, 560)
+            f = {
+                "sx": sx,
+                "sy": sy,
+                "ex": ex,
+                "ey": ey,
+                "delay": random.uniform(0, 0.13),
+                "T": T,
+                "peak": random.uniform(*POG_PEAK) * (0.62 + 0.52 * p),
+                "spin": math.pi * random.choice((3, 5, 7)) * random.choice((-1, 1)),
+                "rot": random.uniform(70, 260) * random.choice((-1, 1)),   # ikot ng design habang lumilipad
                 "design": flipped[k],
-                "turns": random.choice((3, 5, 7)),             # odd number of half turns = lands flipped
-                "slide": random.uniform(-26, 26),              # dagdag na dulas pagkatapos ng landing
-                "bounce": random.uniform(0.13, 0.18),
-                "land_t": delay + dur,
-                "landed": False,
-            })
+            }
+            f["rest"] = pog_rest_point(f)                     # saan siya titigil
+            f["land_events"] = [(s[1], s[4], s[5]) for s in _pog_segments(f)]   # (time, x, y) ng bawat paglapag
+            f["land_t"] = f["delay"] + T * (1.0 + sum(d for d, _ in POG_BOUNCES)) + POG_SLIDE_T
+            f["bounce_fx"] = 0
+            self.flying.append(f)
 
-        # smoke + shock waves at the hands
-        hx, hy = HAND_X[self.turn], REST_TOP - 30
-        for _ in range(int(10 + 22 * p)):
-            a = random.uniform(0, math.tau)
-            s = random.uniform(30, 130) * (0.5 + p)
-            self.smoke.append([hx + random.uniform(-40, 40), hy + random.uniform(-10, 20),
-                               math.cos(a) * s, math.sin(a) * s * 0.6 - 25,
-                               random.uniform(10, 22), 0.0, random.uniform(0.6, 1.0)])
-        self.waves.append([hx, hy, 0.0, 0.55, 240 * (0.5 + p)])
-        self.waves.append([hx, hy, -0.12, 0.55, 170 * (0.5 + p)])
-        self.waves.append([CX, CY, 0.05, 0.45, 110 * (0.5 + p)])
-        self.shake = 4 + 9 * p
-        self.hitstop = HITSTOP                  # sandaling pagyelo para ramdam ang impact
+        # ---- TOTOONG HEAP: ang pog na tumama sa pile o sa kapwa pog ay
+        #      hindi flat na nakahiga - nakatagilid ito at dahan-dahang lumalapat.
+        occupied = [(float(CX), float(CY), POG_D * 0.52, True)] if self.stack else []
+        for f in sorted(self.flying, key=lambda q: q["land_t"]):
+            rx, ry = f["rest"]
+            raised = []
+            for ox, oy, orad, is_raised in occupied:
+                if is_raised and math.hypot(rx - ox, ry - oy) < orad + POG_D * 0.33:
+                    raised.append((ox, oy))
+            if raised:
+                ox = sum(s[0] for s in raised) / len(raised)
+                oy = sum(s[1] for s in raised) / len(raised)
+                layers = min(4, len(raised))
+                f["on_heap"] = True
+                f["tilt"] = min(0.95, random.uniform(0.38, 0.55) + 0.08 * layers)   # rad
+                f["lean"] = math.atan2(ry - oy, rx - ox) + random.uniform(-0.7, 0.7)
+                f["lift"] = min(32.0, 6.0 + 8.0 * layers + random.uniform(0, 5))     # taas sa sahig
+            else:
+                f["on_heap"] = False
+                f["tilt"] = f["lean"] = f["lift"] = 0.0
+            occupied.append((rx, ry, POG_D * 0.40, f["on_heap"]))
+
+        # flat na pog na tatama sana sa gilid ng pile -> ilayo nang kaunti,
+        # para ang mga NAKATAGILID lang ang nasa ibabaw ng pile (hindi sticker-like)
+        for f in self.flying:
+            if f["on_heap"]:
+                continue
+            rx, ry = f["rest"]
+            dx, dy = rx - CX, ry - CY
+            d = math.hypot(dx, dy)
+            clear = POG_D * 1.15 + 12                       # ~95 px mula sa gitna ng pile
+            if d < clear:
+                if d < 1e-3:
+                    a = random.uniform(0, math.tau)
+                    dx, dy, d = math.cos(a), math.sin(a), 1.0
+                rx, ry = CX + dx / d * clear, CY + dy / d * clear
+                rx, ry = _out_of_hands(rx, ry)
+                K = 1.0 + pog_tail_factor(f["T"])
+                f["ex"] = clamp(f["sx"] + (rx - f["sx"]) / K, 230, 1070)
+                f["ey"] = clamp(f["sy"] + (ry - f["sy"]) / K, 95, 560)
+                f["rest"] = pog_rest_point(f)
+                f["land_events"] = [(s[1], s[4], s[5]) for s in _pog_segments(f)]
+
+        # alikabok + flash kung saan lumapat ang palad (gaya ng Karera)
+        self._puff(CX, CY + 26, 10 + int(10 * p), p, spread=52, speed=1.15)
+        self._puff(CX, CY + 26, 6, p * 0.7, spread=84, speed=0.60, life=(0.35, 0.75))
+        self.hitstop = IMPACT_HITSTOP                         # freeze-frame: ramdam ang bigat
+        self.shake = 5 + 10 * p
 
     # ---------------------------------------------------------- circle-click challenge
     def pick_target_pos(self, prev):
         """a random spot anywhere on screen that does not hide the HUD"""
-        avoid = [pygame.Rect(CX - 160, 10, 320, 90), pygame.Rect(20, 20, 190, 40),
-                 pygame.Rect(WIDTH - 210, 20, 190, 40), pygame.Rect(20, 250, 190, 136),
-                 pygame.Rect(WIDTH - 210, 250, 190, 136), pygame.Rect(190, 455, 240, 120),
-                 pygame.Rect(870, 455, 240, 120), pygame.Rect(CX - 250, 115, 500, 110),
+        avoid = [pygame.Rect(250, 8, 800, 160), pygame.Rect(0, 150, 215, 125),
+                 pygame.Rect(WIDTH - 215, 150, 215, 125), pygame.Rect(CX - 300, 150, 600, 140),
+                 pygame.Rect(290, 520, 260, 120), pygame.Rect(750, 520, 260, 120),
                  PAUSE_BTN.inflate(40, 40)]
         for _ in range(80):
             x = random.randint(TARGET_R + 40, WIDTH - TARGET_R - 40)
@@ -2104,7 +2669,7 @@ class PogsGame:
         if self.tclock < 0:
             return
         tg = self.targets[self.tidx]
-        if self.turn == "bot" and tg["hit_at"] is not None and self.tclock >= tg["hit_at"]:
+        if not self.pvp and self.turn == "bot" and tg["hit_at"] is not None and self.tclock >= tg["hit_at"]:
             self.resolve_target(True)
         elif self.tclock >= tg["life"]:
             self.resolve_target(False)
@@ -2112,7 +2677,10 @@ class PogsGame:
     def apply_penalty(self):
         """every miss can cost power - the more you miss, the more likely and the bigger the loss"""
         m = self.misses
-        who = "" if self.turn == "player" else "BOT: "
+        if self.pvp:
+            who = "P1: " if self.turn == "player1" else "P2: "
+        else:
+            who = "" if self.turn == "player" else "BOT: "
         if m == 0:
             self.pen_title, self.pen_sub, self.pen_color = who + "ALL CIRCLES HIT!", "FULL POWER!", (90, 255, 130)
         else:
@@ -2135,7 +2703,7 @@ class PogsGame:
         u = clamp(self.tclock / tg["life"])
         r = max(2, int(TARGET_R * ease_out(clamp(self.tclock / 0.12))))
         ring_r = int(TARGET_R * (1 + 1.6 * (1 - u)))                  # the ring shrinks onto the circle
-        fill = (255, 205, 40) if self.turn == "player" else (255, 130, 100)
+        fill = (255, 205, 40) if (self.turn == "player" or (self.pvp and self.turn == "player1")) else (255, 130, 100)
         pygame.draw.circle(surf, (0, 0, 0), (x + 4, y + 5), r)
         pygame.draw.circle(surf, fill, (x, y), r)
         pygame.draw.circle(surf, (90, 60, 0), (x, y), r, 4)
@@ -2150,203 +2718,229 @@ class PogsGame:
         for pp in self.popups:
             pp[4] += dt
         self.popups = [pp for pp in self.popups if pp[4] < 0.8]
-        for s in self.smoke:
-            s[0] += s[2] * dt
-            s[1] += s[3] * dt
-            s[2] *= 0.96
-            s[3] *= 0.96
-            s[5] += dt
-        self.smoke = [s for s in self.smoke if s[5] < s[6]]
-        for w in self.waves:
-            w[2] += dt
-        self.waves = [w for w in self.waves if w[2] < w[3]]
+        fx_step(self.waves, dt)
         self.shake = max(0.0, self.shake - dt * 28)
 
-    # ---------------------------------------------------------- hands pose
-    def hand_state(self, side):
-        """returns (y_offset, scale, x_jitter)"""
+        # ---------------------------------------------------------- hands pose
+    def peak_scale(self, side):
+        """same Karera formula, but the target tip is the top of the pile so the palm
+        fully swallows the stack at impact - ito ang 'hampas' na itsura ng Karera."""
+        stack_top = CY - 2 - min(45.0, 3.0 * (self.stack - 1)) - POG_D // 2
+        tip = clamp(stack_top - 10, 215, STRIKE_FULL_TIP)
+        full = clamp((HANDS_TOP + HANDS_H - tip) / HANDS_H, 1.25, 1.45)
+        return lerp(STRIKE_MIN, full, self.power)
+
+    def hand_state(self, side, t_override=None):
+        """the SAME 5-beat slam as Dampa Karera:
+        wind-up -> slam -> squash on the floor -> damped spring back.
+        returns (y_offset, scale_x, scale_y, x_jitter)."""
         ph = self.phase
+        t = self.t if t_override is None else t_override
         if ph == "transition":
-            u = clamp(self.t / TRANS_TIME)
+            u = clamp(t / TRANS_TIME)
             if side == self.turn:
                 k = clamp((u - 0.45) / 0.55) if self.prev else clamp(u / 0.7)
-                return HIDE * (1 - ease_out(k)), 1.0, 0
+                return HIDE * (1 - ease_out(k)), 1.0, 1.0, 0
             if side == self.prev:
-                return HIDE * ease_in_out(clamp(u / 0.45)), 1.0, 0
-            return HIDE, 1.0, 0
+                return HIDE * ease_in_out(clamp(u / 0.45)), 1.0, 1.0, 0
+            return HIDE, 1.0, 1.0, 0
         if ph == "end" or side != self.turn:
-            return HIDE, 1.0, 0
+            return HIDE, 1.0, 1.0, 0
         if ph == "meter":
             if self.meter.pos > 0.95:                                    # overcharge shakes
-                return 0, 1.0, random.uniform(-3, 3)
-            return 4 * math.sin(self.t * 6), 1.0, 0                      # gentle idle bob
+                return 0, 1.0, 1.0, random.uniform(-3, 3)
+            return 4 * math.sin(t * 6), 1.0, 1.0, 0                      # gentle idle bob
         if ph in ("target", "tresult"):
-            return 4 * math.sin(self.t * 6), 1.0, 0
+            return 4 * math.sin(t * 6), 1.0, 1.0, 0
         if ph == "smash":
-            strike = 50 + 70 * self.power
-            t = self.t
-            if t < 0.2:                                     # raise the hands
-                k = ease_out(t / 0.2)
-                return 22 * k, 1.0 + 0.10 * k, 0
-            if t < POGS_T_IMPACT:                           # SLAM (pabilis nang pabilis)
-                k = (t - 0.2) / (POGS_T_IMPACT - 0.2)
-                k = k ** 1.7                                # anticipation tapos mabilis na hampas
-                return 22 - (22 + strike) * k, 1.10 - 0.15 * k, 0
-            if t < 0.8:                                     # recover
-                k = ease_in_out((t - POGS_T_IMPACT) / (0.8 - POGS_T_IMPACT))
-                return -strike * (1 - k), 0.95 + 0.05 * k, 0
-        return 0, 1.0, 0
+            peak = self.peak_scale(side)
+            if t < POGS_T_GROW0:                              # 1) wind-up: hands pull back a little
+                k = ease_out(clamp(t / POGS_T_GROW0))
+                return 16.0 * k, 1.0 - 0.045 * k, 1.0 + 0.025 * k, 0
+            if t < POGS_T_IMPACT:                             # 2) the slam: accelerating
+                k = clamp((t - POGS_T_GROW0) / (POGS_T_IMPACT - POGS_T_GROW0)) ** 2.1
+                scx = lerp(0.955, peak * 1.02, k)
+                scy = lerp(1.025, peak * 0.985, k)
+                return lerp(16.0, 0.0, k), scx, scy, 0
+            if t < POGS_T_IMPACT + T_SQUASH:                  # 3) squash: the palm flattens on the floor
+                k = (t - POGS_T_IMPACT) / T_SQUASH
+                sq = math.sin(k * math.pi) * 0.06
+                return 5.0 * (1.0 - k), peak * (1.0 + sq), peak * (1.0 - sq * 1.7), 0
+            if t < POGS_T_IMPACT + T_SQUASH + T_RECOIL:       # 4) damped spring back to rest
+                k = clamp((t - POGS_T_IMPACT - T_SQUASH) / T_RECOIL)
+                wob = math.exp(-4.0 * k) * math.cos(k * math.pi * 2.2)
+                sc = 1.0 + (peak - 1.0) * wob
+                return 0, sc, sc, 0
+        return 0, 1.0, 1.0, 0
 
     # ---------------------------------------------------------- drawing
-    def blit_pog(self, surf, img, x, y, wf=1.0, sc=1.0, alpha=255):
+    def blit_pog(self, surf, img, x, y, wf=1.0, sc=1.0, rot=0.0, hf=1.0, rim=0):
         w = max(2, int(POG_D * sc * wf))
-        h = max(2, int(POG_D * sc))
+        h = max(2, int(POG_D * sc * hf))
         s = img if (w, h) == img.get_size() else pygame.transform.scale(img, (w, h))
-        if alpha < 255:
-            s = s.copy()
-            s.set_alpha(alpha)
+        if rot:
+            s = pygame.transform.rotozoom(s, rot, 1.0)
+        if rim:                                  # kapal ng pog: dark edge sa ilalim
+            edge = silhouette(s, 150)
+            surf.blit(edge, edge.get_rect(center=(int(x), int(y) + rim)))
         surf.blit(s, s.get_rect(center=(int(x), int(y))))
 
     def shadow(self, surf, x, y, wf=1.0, sc=1.0, alpha=70):
-        """soft ellipse sa ilalim ng pog - naka-cache para hindi nagsisigawa ng surface bawat frame"""
         w, h = max(2, int(POG_D * sc * wf)), max(2, int(POG_D * sc * 0.55))
-        qa = max(6, min(240, int(alpha) // 6 * 6))
-        key = (w, h, qa)
-        s = self._shadow_cache.get(key)
-        if s is None:
-            if len(self._shadow_cache) > 240:
-                self._shadow_cache.clear()
-            s = pygame.Surface((w, h), pygame.SRCALPHA)
-            pygame.draw.ellipse(s, (0, 0, 0, qa), s.get_rect())
-            self._shadow_cache[key] = s
+        s = pygame.Surface((w, h), pygame.SRCALPHA)
+        pygame.draw.ellipse(s, (0, 0, 0, alpha), s.get_rect())
         surf.blit(s, s.get_rect(center=(int(x + 4), int(y + 6))))
 
-    # ---------------------------------------------------------- flight physics
-    def flight_time(self):
-        """gaano na katagal mula nang tumama ang kamay (None kung wala pang impact)"""
-        if self.phase == "smash":
-            return max(0.0, self.t - POGS_T_IMPACT)
-        if self.phase == "flip":
-            return (SMASH_TIME - POGS_T_IMPACT) + self.t
-        return None
-
-    def pog_flight(self, p, ft):
-        """posisyon ng isang pog: (x, y_sa_lupa, taas_sa_hangin, progress 0..1)"""
-        sx, sy = p["start"]
-        ex, ey = p["end"]
-        t = ft - p["delay"]
-        if t <= 0.0:
-            return sx, sy, 0.0, 0.0
-
-        dur = p["dur"]
-        if t < dur:
-            u = t / dur
-            k = 1.0 - (1.0 - u) ** 1.45            # bahagyang bumabagal, may bilis pa pag-landing
-            air = p["arc"] * 4.0 * u * (1.0 - u)   # tunay na parabola (0 sa simula at sa dulo)
-            return lerp(sx, ex, k), lerp(sy, ey, k), air, u
-
-        # ---- landing: dalawang maliit na bounce, tapos pahinga
-        b = t - dur
-        b1 = p["bounce"]
-        slide = p["slide"] * ease_out(clamp(b / (b1 * 2.2)))
-        if b < b1:
-            v = b / b1
-            air = p["arc"] * 0.26 * 4.0 * v * (1.0 - v)
-        elif b < b1 * 2.0:
-            v = (b - b1) / b1
-            air = p["arc"] * 0.08 * 4.0 * v * (1.0 - v)
-        else:
-            air = 0.0
-        return ex + slide, ey, air, 1.0
-
-    def update_flying(self, dt):
-        """dust puff sa unang pagtama ng bawat pog sa lupa"""
-        ft = self.flight_time()
-        if ft is None:
-            return
-        for p in self.flying:
-            if p["landed"] or ft < p["land_t"]:
-                continue
-            p["landed"] = True
-            x, y = p["end"]
-            for _ in range(3):
-                a = random.uniform(-math.pi, 0.0)
-                s = random.uniform(15, 55)
-                self.smoke.append([x + random.uniform(-14, 14), y + random.uniform(2, 10),
-                                   math.cos(a) * s, math.sin(a) * s * 0.5 - 5,
-                                   random.uniform(5, 10), 0.0, random.uniform(0.3, 0.55)])
-
     def draw_stack(self, surf):
-        jolt, squash = 0.0, 0.0
-        if self.phase == "smash" and POGS_T_IMPACT <= self.t < POGS_T_IMPACT + 0.22:
-            k = (self.t - POGS_T_IMPACT) / 0.22
-            jolt = random.uniform(-2.5, 2.5) * (1 - k)          # nanginginig sa impact
-            squash = 5.0 * (1 - k) * (1 - k)                    # naipit pababa ang stack
+        jolt = self.stack_shake                              # damped nginig pagkatapos ng hampas
+        squash = 1.0
+        if self.phase == "smash" and self.t >= POGS_T_IMPACT:
+            k = clamp((self.t - POGS_T_IMPACT) / 0.18)
+            squash = 1.0 - 0.10 * (1.0 - k)                  # naipit sandali ng palad
         for i in range(self.stack):
             ox, oy = self.stack_off[i % MAX_STACK]
-            gap = min(3.0, 45.0 / max(self.stack, 1)) * (1 - squash / 40)
-            x, y = CX + ox + jolt, CY + oy - i * gap + squash
+            x = CX + ox + jolt
+            y = CY + oy - i * min(3.0, 45.0 / max(self.stack, 1)) + (1.0 - squash) * 12
             self.shadow(surf, x, y, alpha=45 if i else 80)
-            self.blit_pog(surf, self.A["fronts"][self.pile[i]], x, y)
+            self.blit_pog(surf, self.A["fronts"][self.pile[i]], x, y,
+                          1.0 + (1.0 - squash) * 0.6, 1.0, 0.0, squash)
 
     def draw_flying(self, surf):
-        coll = (70, 640) if self.turn == "player" else (WIDTH - 70, 640)
-        ft = self.flight_time()
+        # BOT is on the left, PLAYER on the right (like the reference HUD); PvP: P1 left / P2 right
+        if self.pvp:
+            coll = (70, 640) if self.turn == "player1" else (WIDTH - 70, 640)
+        else:
+            coll = (WIDTH - 70, 640) if self.turn == "player" else (70, 640)
+        if not self.flying:
+            return
+        if self.phase in ("smash", "flip"):
+            if self.phase == "smash":
+                ft = max(0.0, self.t - POGS_T_IMPACT)
+            else:
+                ft = (SMASH_TIME - POGS_T_IMPACT) + self.t
+        elif self.phase == "collect":
+            ft = None
+        else:
+            return
+
+        # sort by depth para tama ang overlap: mas malayo (taas sa screen) ang unang iginuhit
+        items = []
         for p in self.flying:
-            ex, ey = p["end"]
-            if ft is not None:
-                x, y, air, u = self.pog_flight(p, ft)
-                ang = math.pi * p["turns"] * u
-                wf = max(0.10, abs(math.cos(ang)))
-                face = self.A["fronts"][p["design"]] if math.cos(ang) > 0 else self.A["back"]
+            st = pog_flight_at(p, ft) if ft is not None else None
+            items.append(((st[1] if st else p["rest"][1]), p, st))
+        items.sort(key=lambda it: it[0])
 
-                # shadow: lumiit at kumupas habang tumataas ang pog
-                sh = clamp(1.0 - air / 420.0, 0.45, 1.0)
-                self.shadow(surf, x, y, wf * sh, sh, int(72 * clamp(1.0 - air / 520.0, 0.18, 1.0)))
-
-                # motion blur habang mabilis pa (mahina lang para hindi malabo)
-                if air > 10 and u < 0.8:
-                    gx, gy, gair, _ = self.pog_flight(p, ft - p["dur"] * 0.03)
-                    self.blit_pog(surf, face, gx, gy - gair, wf, 1.0 + gair / 400.0, alpha=38)
-
-                self.blit_pog(surf, face, x, y - air, wf, 1.0 + air / 400.0)
-            else:                                           # landed na / kinokolekta
-                u = ease_in_out(clamp(self.t / COLLECT_TIME)) if self.phase == "collect" else 0.0
-                x, y = lerp(ex + p.get("slide", 0.0), coll[0], u), lerp(ey, coll[1], u)
-                self.shadow(surf, x, y, alpha=int(60 * (1 - u)))
-                self.blit_pog(surf, self.A["back"], x, y, 1.0, 1.0 - 0.45 * u)
+        for _, p, st in items:
+            if ft is None:                                  # collect: lumilipad papunta sa manlalaro
+                ex, ey = p["rest"]
+                u = ease_in_out(clamp(self.t / COLLECT_TIME))
+                x, y = lerp(ex, coll[0], u), lerp(ey, coll[1], u)
+                d = pog_depth(y)
+                tilt = p["tilt"] * (1.0 - u) if p["on_heap"] else 0.0
+                hf = max(0.5, math.cos(tilt))
+                lift = p["lift"] * (1.0 - u) if p["on_heap"] else 0.0
+                self.shadow(surf, x, y, sc=d, alpha=int(60 * (1 - u)))
+                self.blit_pog(surf, self.A["back"], x, y - lift, 1.0,
+                              d * (1.0 - 0.5 * u), p["rot"] + math.degrees(p["lean"]) + 90.0, hf,
+                              rim=int(4 * (1.0 - u)))
+                continue
+            x, gy, z, ang, landed = st
+            if landed:                                      # nakalapag na (back side up)
+                d = pog_depth(gy)
+                if p["on_heap"]:
+                    # naka-patong sa pile / kapwa pog: dumadapo pa sya at
+                    # dahan-dahang tumatagilid bago tuluyang huminto.
+                    age = max(0.0, ft - p["land_t"]) if ft is not None else 9.0
+                    wob = 1.0 - math.exp(-7.0 * age) * math.cos(age * 20.0) if age > 0 else 0.0
+                    tilt = p["tilt"] * clamp(wob, 0.0, 1.35)
+                    lift = p["lift"] * clamp(wob, 0.0, 1.25)
+                    hf = max(0.50, math.cos(tilt))
+                    lean = p["lean"]
+                    self.shadow(surf, x + math.cos(lean) * 5, gy + 6, 0.92, d, 95)
+                    self.blit_pog(surf, self.A["back"], x, gy - lift, 1.0, d,
+                                  p["rot"] + math.degrees(lean) + 90.0, hf,
+                                  rim=max(2, int(5 * d * hf)))
+                else:
+                    self.shadow(surf, x, gy, sc=d, alpha=70)
+                    self.blit_pog(surf, self.A["back"], x, gy, 1.0, d, p["rot"])
+                continue
+            # shadow: lumalabo at lumalaki habang mataas ang pog
+            k = clamp(z / max(1.0, p["peak"]))
+            d = pog_depth(gy)
+            self.shadow(surf, x, gy, 1.0 + 0.30 * k, sc=d, alpha=int(72 - 44 * k))
+            # pog: lumalapit sa camera habang nasa ere, umiikot, at lumalapat sa sahig
+            sc = d * (1.0 + z / 620.0)
+            wf = max(0.10, abs(math.cos(ang)))
+            face = self.A["fronts"][p["design"]] if math.cos(ang) >= 0 else self.A["back"]
+            tt = max(0.0, ft - p["delay"])
+            rot = p["rot"] * clamp(tt / (p["T"] * 1.7))
+            hf = 1.0
+            z_prev = pog_flight_at(p, max(0.0, ft - 0.030))[2]
+            if 0.01 < z < 18.0:                         # malapit sa sahig: lumalapat (squash)
+                q = 1.0 - z / 18.0
+                if z < z_prev:                           # pababa: pipi bago tumalbog
+                    hf = 1.0 - 0.24 * q
+                    wf = wf * (1.0 + 0.12 * q)
+                else:                                    # paakyat: bumabalik ang hugis
+                    hf = 1.0 - 0.10 * q
+            self.blit_pog(surf, face, x, gy - z, wf, sc, rot, hf)
 
     def draw_fx(self, surf):
         fx = self.fx
         fx.fill((0, 0, 0, 0))
-        for w in self.waves:
-            age = w[2]
-            if age < 0:
-                continue
-            k = age / w[3]
-            r = int(15 + w[4] * ease_out(k))
-            pygame.draw.circle(fx, (255, 255, 255, int(190 * (1 - k))), (int(w[0]), int(w[1])), r, 4)
-        for s in self.smoke:
-            k = s[5] / s[6]
-            r = int(s[4] * (1 + 1.8 * k))
-            a = int(150 * (1 - k))
-            pygame.draw.circle(fx, (215, 215, 215, a), (int(s[0]), int(s[1])), r)
+        draw_waves(fx, self.waves)
         surf.blit(fx, (0, 0))
+        # alikabok (impact + bawat paglapag ng pog) - nasa harap ng kamay
+        self.draw_puffs(surf)
 
     def draw_hands(self, surf):
-        for side in ("player", "bot"):
-            off, sc, jx = self.hand_state(side)
+        """the SAME palm as Dampa Karera: two parts (palm + forearm), squash & stretch,
+        motion smear on the way down, and the forearms stay planted on the floor."""
+        sides = ("player1", "player2") if self.pvp else ("player", "bot")
+        for side in sides:
+            off, scx, scy, jx = self.hand_state(side)
             if off >= HIDE:
                 continue
-            img = self.A["hands"][side]
-            shad = self.A["hand_shadow"]
-            w, h = int(img.get_width() * sc), int(img.get_height() * sc)
-            if sc != 1.0:
-                img = pygame.transform.smoothscale(img, (w, h))
-                shad = pygame.transform.smoothscale(shad, (w, h))
-            px, py = int(HAND_X[side] + jx - w // 2), int(REST_TOP + off)
-            surf.blit(shad, (px + 14, py + 12))               # soft drop shadow on the floor
-            surf.blit(img, (px, py))
+            asset_side = ("player" if side == "player1" else "bot") if self.pvp else side
+            hw = max(2, int(HANDS_TOP_IMG.get_width() * scx))
+            hh = max(2, int(HANDS_TOP_IMG.get_height() * scy))
+            top = HANDS_TOP_IMG if (hw, hh) == HANDS_TOP_IMG.get_size() else \
+                pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh))
+            shad = HANDS_TOP_SHADOW if (hw, hh) == HANDS_TOP_SHADOW.get_size() else \
+                pygame.transform.smoothscale(HANDS_TOP_SHADOW, (hw, hh))
+            if asset_side == "bot":                     # P2 / bot = darker skin (same as before)
+                top = top.copy()
+                top.fill((170, 120, 100, 255), special_flags=pygame.BLEND_RGBA_MULT)
+            y = HANDS_TOP + HANDS_H - HANDS_H * scy + off
+            wrist_y = int(y + hh - 1)
+            arm_h = max(int(HANDS_ARMS_IMG.get_height() * scy), HEIGHT + 8 - wrist_y)
+            arms = HANDS_ARMS_IMG if (hw, arm_h) == HANDS_ARMS_IMG.get_size() else \
+                pygame.transform.smoothscale(HANDS_ARMS_IMG, (hw, arm_h))
+            arm_shad = HANDS_ARMS_SHADOW if (hw, arm_h) == HANDS_ARMS_SHADOW.get_size() else \
+                pygame.transform.smoothscale(HANDS_ARMS_SHADOW, (hw, arm_h))
+            if asset_side == "bot":
+                arms = arms.copy()
+                arms.fill((170, 120, 100, 255), special_flags=pygame.BLEND_RGBA_MULT)
+            hx = int(CX + jx - hw // 2)
+
+            surf.blit(arm_shad, (hx + 14, wrist_y + 10))     # forearm shadow
+            surf.blit(shad, (hx + 14, int(y) + 10))          # palm shadow
+
+            # motion smear while the palm is still rushing forward (2 ghost frames)
+            if self.phase == "smash" and POGS_T_GROW0 <= self.t < POGS_T_IMPACT:
+                for back, a in ((0.022, 80), (0.046, 45)):
+                    o2, _, y2, _ = self.hand_state(side, self.t - back)
+                    hh2 = max(2, int(HANDS_TOP_IMG.get_height() * y2))
+                    gh = HANDS_TOP_IMG if hh2 == HANDS_TOP_IMG.get_height() else \
+                        pygame.transform.smoothscale(HANDS_TOP_IMG, (hw, hh2))
+                    gh = gh.copy()
+                    if asset_side == "bot":
+                        gh.fill((170, 120, 100, 255), special_flags=pygame.BLEND_RGBA_MULT)
+                    gh.set_alpha(a)
+                    surf.blit(gh, (hx, int(HANDS_TOP + HANDS_H - HANDS_H * y2 + o2)))
+
+            surf.blit(arms, (hx, wrist_y))
+            surf.blit(top, (hx, int(y)))
 
     def box(self, surf, rect, text, font=None):
         pygame.draw.rect(surf, (0, 0, 0), rect, border_radius=14)
@@ -2369,85 +2963,122 @@ class PogsGame:
         surf.blit(img, r)
 
     def draw_bar(self, surf, x, y, label):
+        """power bar like the reference: red track + green power fill"""
         m = self.meter
-        w, h = 170, 22
-        # lightning icon
-        bolt = [(x - 12, y - 8), (x - 30, y + 14), (x - 20, y + 14), (x - 28, y + 34), (x - 4, y + 8), (x - 15, y + 8)]
-        pygame.draw.polygon(surf, (255, 205, 40), bolt)
-        pygame.draw.polygon(surf, (90, 60, 0), bolt, 2)
-        self.text(surf, self.f_small, label, (20, 20, 20), (x + w // 2, y - 12), shadow=False)
-        pygame.draw.rect(surf, (30, 30, 30), (x - 3, y - 3, w + 6, h + 6), border_radius=8)
-        pygame.draw.rect(surf, (120, 120, 120), (x, y, w, h), border_radius=6)
+        w, h = 230, 14
+        self.text(surf, self.f_mid, label, WHITE, (x + w // 2, y - 20))
+        pygame.draw.rect(surf, (0, 0, 0), (x - 3, y - 3, w + 6, h + 6))
+        pygame.draw.rect(surf, (240, 60, 40), (x, y, w, h))                 # red track
         fill = int(w * clamp(m.pos))
         if fill > 0:
-            col = (255, 90, 40) if m.pos > 0.95 else (255, 205, 40)
-            pygame.draw.rect(surf, col, (x, y, fill, h), border_radius=6)
+            col = (255, 150, 40) if m.pos > 0.95 else (60, 230, 50)         # green power fill
+            pygame.draw.rect(surf, col, (x, y, fill, h))
         # the sweet spot (80-90%) - blinks while the player is aiming
-        blink = not (self.turn == "player" and self.phase == "meter" and int(self.t * 5) % 2 == 0)
-        pygame.draw.rect(surf, (90, 255, 130) if blink else (200, 255, 210),
-                         (x + int(IDEAL_LO * w), y - 6, int((IDEAL_HI - IDEAL_LO) * w), h + 12), 2)
-        pygame.draw.line(surf, (255, 255, 255), (x + fill, y - 5), (x + fill, y + h + 5), 3)
-        self.text(surf, self.f_small, f"{int(m.pos * 100)}%", WHITE, (x + w // 2, y + h + 18))
-        if self.turn == "player" and self.phase == "meter":
-            self.text(surf, self.f_small, "[SPACE] stop in the green box!", WHITE, (x + w // 2, y + h + 40))
+        if self.pvp:
+            blink_on_turn = (self.turn == "player1" or self.turn == "player2")
+        else:
+            blink_on_turn = (self.turn == "player")
+        blink = not (blink_on_turn and self.phase == "meter" and int(self.t * 5) % 2 == 0)
+        pygame.draw.rect(surf, (255, 235, 90) if blink else (255, 255, 255),
+                         (x + int(IDEAL_LO * w), y - 5, int((IDEAL_HI - IDEAL_LO) * w), h + 10), 2)
+        pygame.draw.line(surf, (255, 255, 255), (x + fill, y - 4), (x + fill, y + h + 4), 3)
+        self.text(surf, self.f_small, f"{int(m.pos * 100)}%", WHITE, (x + w // 2, y + h + 16))
+        if blink_on_turn and self.phase == "meter":
+            if self.pvp:
+                self.text(surf, self.f_small, "[Q] STOP IN GREEN BOX" if self.turn == "player1" else "[P] STOP IN GREEN BOX", WHITE, (x + w // 2, y + h + 38))
+            else:
+                self.text(surf, self.f_small, "[SPACE] STOP IN GREEN BOX", WHITE, (x + w // 2, y + h + 38))
 
     def draw_hud(self, surf):
-        # top-center ROUNDS box
-        r = pygame.Rect(CX - 160, 10, 320, 90)
-        pygame.draw.rect(surf, (0, 0, 0), r, border_radius=16)
-        pygame.draw.rect(surf, (90, 60, 0), r, 3, border_radius=16)
-        self.text(surf, self.f_mid, "ROUNDS", WHITE, (r.centerx, r.y + 28), shadow=False)
-        self.text(surf, self.f_big, str(self.round), WHITE, (r.centerx, r.y + 63), shadow=False)
-
-        # pogs collected so far
-        self.box(surf, pygame.Rect(20, 20, 190, 40), f"YOU: {self.pogs['player']} pogs")
-        self.box(surf, pygame.Rect(WIDTH - 210, 20, 190, 40), f"BOT: {self.pogs['bot']} pogs")
-
-        if self.phase == "end":
-            return
-        side = self.turn
-        bx = 20 if side == "player" else WIDTH - 210
-        if self.phase == "transition":
-            secs = int(TURN_TIME)
-        elif self.phase == "meter":
-            secs = int(math.ceil(max(0.0, TURN_TIME - self.t)))
+        hud_pill(surf, HUD_ROUND, f"ROUND {self.round}", TITLE_FONT)
+        if self.pvp:
+            hud_pill(surf, HUD_L_LABEL, "P1")
+            hud_pill(surf, HUD_L_VALUE, f"{self.pogs['player1']} POGS")
+            hud_pill(surf, HUD_R_LABEL, "P2")
+            hud_pill(surf, HUD_R_VALUE, f"{self.pogs['player2']} POGS")
+            # the two pills on each side: FLIP + STACK
+            for rects, who in ((HUD_SIDE_L, "player1"), (HUD_SIDE_R, "player2")):
+                hud_pill(surf, rects[0], f"FLIP: {self.last_flip[who]}")
+                hud_pill(surf, rects[1], f"STACK: {self.stack}")
         else:
-            secs = 0
-        for i, txt in enumerate((f"FLIP: {self.last_flip[side]}", f"STACK: {self.stack}",
-                                 f"TIME: {secs} seconds")):
-            self.box(surf, pygame.Rect(bx, 250 + i * 48, 190, 40), txt)
-        if self.phase != "transition":
-            barx = HAND_X[side] - 330 if side == "player" else HAND_X[side] + 170
-            self.draw_bar(surf, barx, 490, "PLAYER" if side == "player" else "BOT")
+            hud_pill(surf, HUD_L_LABEL, "BOT")
+            hud_pill(surf, HUD_L_VALUE, f"{self.pogs['bot']} POGS")
+            hud_pill(surf, HUD_R_LABEL, "PLAYER")
+            hud_pill(surf, HUD_R_VALUE, f"{self.pogs['player']} POGS")
+            # the two pills on each side: FLIP + STACK
+            for rects, who in ((HUD_SIDE_L, "bot"), (HUD_SIDE_R, "player")):
+                hud_pill(surf, rects[0], f"FLIP: {self.last_flip[who]}")
+                hud_pill(surf, rects[1], f"STACK: {self.stack}")
+
+        # timer pill (under the ROUND pill)
+        t_txt = ""
+        if self.phase == "transition":
+            t_txt = f"TIME: {int(TURN_TIME)}"
+        elif self.phase == "meter":
+            t_txt = f"TIME: {int(math.ceil(max(0.0, TURN_TIME - self.t)))}"
+        hud_pill(surf, HUD_TIMER, t_txt)
+
+        if self.phase in ("end", "transition"):
+            return
+        # power bar for the current turn
+        if self.pvp:
+            if self.turn == "player1":
+                self.draw_bar(surf, CX - 360, 560, "P1")      # left of the hands
+            else:
+                self.draw_bar(surf, CX + 130, 560, "P2")      # right of the hands
+        else:
+            if self.turn == "player":
+                self.draw_bar(surf, CX - 360, 560, "YOU")      # left of the hands
+            else:
+                self.draw_bar(surf, CX + 130, 560, "BOT")      # right of the hands
 
     def draw_messages(self, surf):
         if self.phase == "transition":
             u = clamp(self.t / TRANS_TIME)
             a = int(255 * min(1, u / 0.2, (1 - u) / 0.2))
-            who = "YOUR TURN" if self.turn == "player" else "BOT'S TURN"
-            self.text(surf, self.f_huge, who, WHITE, (CX, 190), alpha=max(0, a))
-            self.text(surf, self.f_mid, f"stack: {self.stack} pogs", WHITE, (CX, 245), alpha=max(0, a))
+            if self.pvp:
+                who = "PLAYER 1 TURN" if self.turn == "player1" else "PLAYER 2 TURN"
+            else:
+                who = "YOUR TURN" if self.turn == "player" else "BOT'S TURN"
+            self.text(surf, self.f_huge, who, WHITE, (CX, 225), alpha=max(0, a))
+            self.text(surf, self.f_mid, f"stack: {self.stack} pogs", WHITE, (CX, 285), alpha=max(0, a))
         elif self.phase == "target":
             n = len(self.targets)
-            title = "CLICK THE CIRCLES!" if self.turn == "player" else "BOT IS CLICKING..."
-            self.text(surf, self.f_big, title, GOLD, (CX, 150))
-            self.text(surf, self.f_mid, f"CIRCLE {min(self.tidx + 1, n)}/{n}   MISSES: {self.misses}", WHITE, (CX, 195))
+            if self.pvp:
+                title = "CLICK THE CIRCLES!" if self.turn == "player1" else "PLAYER 2 IS CLICKING..."
+            else:
+                title = "CLICK THE CIRCLES!" if self.turn == "player" else "BOT IS CLICKING..."
+            self.text(surf, self.f_big, title, GOLD, (CX, 190))
+            self.text(surf, self.f_mid, f"CIRCLE {min(self.tidx + 1, n)}/{n}   MISSES: {self.misses}", WHITE, (CX, 235))
         elif self.phase == "tresult":
-            self.text(surf, self.f_big, self.pen_title, self.pen_color, (CX, 150))
-            self.text(surf, self.f_mid, self.pen_sub, WHITE, (CX, 195))
+            self.text(surf, self.f_big, self.pen_title, self.pen_color, (CX, 190))
+            self.text(surf, self.f_mid, self.pen_sub, WHITE, (CX, 235))
         elif self.phase in ("lock", "smash") or (self.phase == "meter" and self.meter.locked):
-            self.text(surf, self.f_big, strike_name(self.power), GOLD, (CX, 150))
+            self.text(surf, self.f_big, strike_name(self.power), GOLD, (CX, 190))
         elif self.phase in ("flip", "collect"):
-            self.text(surf, self.f_big, self.msg, GOLD, (CX, 140))
-            self.text(surf, self.f_mid, self.msg2, WHITE, (CX, 185))
+            self.text(surf, self.f_big, self.msg, GOLD, (CX, 185))
+            self.text(surf, self.f_mid, self.msg2, WHITE, (CX, 230))
 
     def draw(self, mouse):
         c = self.canvas
         c.blit(self.A["floor"], (0, 0))
         self.draw_stack(c)
+
+        # impact ring sa sahig, nasa ilalim ng palad (gaya ng Dampa Karera)
+        if self.phase == "smash" and self.t >= POGS_T_IMPACT:
+            k = (self.t - POGS_T_IMPACT) / 0.34
+            self.draw_impact_ring(c, CX, CY + 34, self.power, k)
+
+        # SAME layering as Karera: habang nakapatong ang palad, kamay ang nasa harap;
+        # pagkatapos ng impact, lumilipad ang pogs sa HARAP ng kamay.
+        pressing = self.phase == "smash" and self.t < POGS_T_IMPACT + 0.12
+        if not pressing:
+            self.draw_hands(c)
         self.draw_flying(c)
+        if pressing:
+            self.draw_hands(c)
+
         self.draw_fx(c)
-        self.draw_hands(c)
         self.draw_targets(c)
         self.draw_hud(c)
         self.draw_messages(c)
@@ -2466,12 +3097,18 @@ class PogsGame:
         self.win.blit(dim, (0, 0))
         panel(END_PANEL)
         pygame.draw.rect(self.win, LINE_BROWN, END_PANEL, 4, border_radius=14)
-        title = {"win": "YOU WIN!", "loss": "YOU LOSE!", "tie": "IT'S A TIE!"}[self.final]
+        if self.pvp:
+            title = {"p1": "PLAYER 1 WINS!", "p2": "PLAYER 2 WINS!", "ptie": "IT'S A TIE!"}[self.final]
+            line = f"P1 {self.pogs['player1']}   -   {self.pogs['player2']} P2"
+            cheer = "Nice one! Rematch?" if self.final != "ptie" else "So close! Rematch?"
+        else:
+            title = {"win": "YOU WIN!", "loss": "YOU LOSE!", "tie": "IT'S A TIE!"}[self.final]
+            line = f"you {self.pogs['player']} / {self.pogs['bot']} bot  (pogs)"
+            cheer = {"win": "Galing! Great job!", "loss": "Okay lang! Try again!", "tie": "So close! Rematch?"}[self.final]
         pop_text(self.f_huge, title, BROWN, (END_PANEL.centerx, END_PANEL.y + 55),
                  ease_out(clamp(self.t / 0.4)))
-        self.text(self.win, self.f_mid, f"you {self.pogs['player']} / {self.pogs['bot']} bot  (pogs)", BROWN,
+        self.text(self.win, self.f_mid, line, BROWN,
                   (END_PANEL.centerx, END_PANEL.y + 115), shadow=False)
-        cheer = {"win": "Galing! Great job!", "loss": "Okay lang! Try again!", "tie": "So close! Rematch?"}[self.final]
         self.text(self.win, self.f_small, cheer, LINE_BROWN, (END_PANEL.centerx, END_PANEL.y + 148), shadow=False)
         button(END_AGAIN, "PLAY AGAIN", END_AGAIN.collidepoint(mouse), self.f_mid)
         button(END_MENU, "MENU", END_MENU.collidepoint(mouse), self.f_mid)
@@ -2480,12 +3117,25 @@ class PogsGame:
 # =====================================================================
 #  MENU / SCORE / EXIT SCREENS
 # =====================================================================
-def draw_menu(mouse):
+REVEAL_SURF = pygame.Surface((WIDTH, HEIGHT))
+REVEAL_SURF.fill((0, 0, 0))
+
+
+def draw_logo(now, amp=1.0):
+    if not LETTERS:
+        WIN.blit(LOGO, LOGO_POS.move(0, int(math.sin(now / 500) * 6 * amp)))
+        return
+    for i, img in enumerate(LETTERS):
+        WIN.blit(img, LOGO_POS.move(0, int(math.sin(now / 420.0 - i * 0.9) * 8 * amp)))
+
+
+def draw_menu(mouse, reveal=1.0):
     now = pygame.time.get_ticks()
     WIN.blit(BG, (0, 0))
     AMBIENT.draw(WIN)
-    bob = int(math.sin(now / 500) * 6)                         # the logo floats up and down
-    WIN.blit(LOGO, LOGO_POS.move(0, bob))
+    k = ease_in_out(clamp(reveal))
+    if reveal >= 1.0:
+        draw_logo(now)
     text_center(SMALL_FONT, TIPS[(now // 4000) % len(TIPS)], GOLD, (WIDTH // 2, 26), shadow=True)
     for label, rect in MENU_BUTTONS.items():
         button(rect, "SCORES" if label == "SCORE" else label, rect.collidepoint(mouse))
@@ -2493,156 +3143,129 @@ def draw_menu(mouse):
     for line in DESCRIPTION:
         text_center(DESC_FONT, line, TEXT_COLOR, (WIDTH // 2, y), shadow=True)
         y += 24
+    if reveal < 1.0:
+        REVEAL_SURF.set_alpha(int(255 * (1.0 - k)))
+        WIN.blit(REVEAL_SURF, (0, 0))
+        draw_logo(now, k)
 
 
+COUNT_FONT = PixelFont(180)
 
 
-
-
-_SCORE_CACHE = {}
-
-
-def score_pill(text, fill, edge, text_color=WHITE, font=None, pad=18, min_w=92, gloss=True):
-    """rounded label pill (cached) - the WIN / DEFEAT / TIE badges and the mode chip"""
-    font = font or DESC_FONT
-    key = (text, fill, edge, text_color, pad, min_w, gloss)
-    surf = _SCORE_CACHE.get(key)
-    if surf is None:
-        img = font.render(text, True, text_color)
-        tw, th = img.get_size()
-        w, h = max(min_w, tw + pad), th + 10
-        surf = pygame.Surface((w, h), pygame.SRCALPHA)
-        pygame.draw.rect(surf, fill, surf.get_rect(), border_radius=h // 2)
-        pygame.draw.rect(surf, edge, surf.get_rect(), 2, border_radius=h // 2)
-        if gloss and h > 14:
-            # opaque na lighter shade (hindi white+alpha, kundi binubutas nito ang fill
-            # at nawawala ang itaas ng puting text)
-            hi = (min(255, fill[0] + 55), min(255, fill[1] + 55), min(255, fill[2] + 55), 255)
-            pygame.draw.rect(surf, hi, (6, 2, max(2, w - 12), max(2, h // 2 - 3)),
-                             border_radius=max(2, h // 4))
-        surf.blit(img, img.get_rect(center=(w // 2, h // 2)))
-        if len(_SCORE_CACHE) > 80:
-            _SCORE_CACHE.clear()
-        _SCORE_CACHE[key] = surf
-    return surf
+def draw_countdown(c):
+    if c < 3.0:
+        text, color = str(3 - int(c)), GOLD
+        k = ease_out(clamp((c - int(c)) * 4))
+        alpha = 255
+    else:
+        text, color = "GO!", (140, 255, 140)
+        k = ease_out(clamp((c - 3.0) * 4))
+        alpha = int(255 * clamp((3.7 - c) / 0.4))
+    pop_text(COUNT_FONT, text, color, (WIDTH // 2, 430), k, alpha=alpha)
 
 
 def draw_score(mouse, bg=None):
     backdrop(bg)
-    t = SCORE_PAPER
+    t = SCORE_TABLE
 
-    # soft shadow behind the paper so it lifts off the background
-    shadow = pygame.Surface((t.w, t.h), pygame.SRCALPHA)
-    pygame.draw.rect(shadow, (0, 0, 0, 75), shadow.get_rect())
-    WIN.blit(shadow, (t.x + 9, t.y + 11))
-
+    wood = ui_img("score_wood", SCORE_BOARD.size)
+    if wood is not None:
+        WIN.blit(wood, SCORE_BOARD.topleft)                           # YOUR wood board
+    else:
+        b = wood_box(SCORE_BOARD.w, SCORE_BOARD.h, (214, 160, 96), 8, (96, 44, 20))
+        WIN.blit(b, b.get_rect(center=SCORE_BOARD.center))
+        nail(SCORE_BOARD.right - 14, SCORE_BOARD.y + 14)
+        nail(SCORE_BOARD.x + 14, SCORE_BOARD.bottom - 14)
+        nail(SCORE_BOARD.right - 14, SCORE_BOARD.bottom - 14)
     paper = ui_img("score_paper", t.size)
     if paper is not None:
-        WIN.blit(paper, t.topleft)
+        WIN.blit(paper, t.topleft)                                    # YOUR paper
     else:
         paper_box(t)
+    sign = ui_img("score_sign", SCORE_SIGN.size)
+    if sign is not None:
+        WIN.blit(sign, SCORE_SIGN.topleft)                            # YOUR SCORE sign
+    else:
+        draw_sign(SCORE_PLANK, "SCORE")
 
-    button(SCORE_SIGN, "SCORE", False, BIG_FONT, pal="gold", key="score_sign")
+    # table area = the paper minus a small margin (and the scroll strip on the right)
+    x0 = t.x + 20
+    uw = t.width - 50
+    xr = x0 + uw
+    
+    # 6 columns distribution para sakto sa reference image
+    cw = [int(uw * 0.26), int(uw * 0.08), int(uw * 0.20), int(uw * 0.08), int(uw * 0.20), int(uw * 0.18)]
+    cx = [x0 + sum(cw[:i]) + cw[i] // 2 for i in range(6)]
+    vx = [x0 + sum(cw[:i+1]) for i in range(5)]
 
-    x0 = t.x + SCORE_PAD_L
-    xr = t.right - SCORE_PAD_R
-    uw = xr - x0
-    y0 = t.y + SCORE_TOP_PAD
-    rows_top = SCORE_ROWS_TOP
-    bottom = rows_top + SCORE_VIEW_H
+    # header row (does not scroll)
+    text_center(SMALL_FONT, "STREAK", BROWN, (cx[0], t.y + HEAD_ROW_H // 2))
+    text_center(SMALL_FONT, "ENEMYMODE", BROWN, ((cx[1] + cx[4]) // 2, t.y + HEAD_ROW_H // 2))
+    # Stacked ang GAME MODES tulad sa picture
+    text_center(DESC_FONT, "GAME", BROWN, (cx[5], t.y + HEAD_ROW_H // 2 - 10))
+    text_center(DESC_FONT, "MODES", BROWN, (cx[5], t.y + HEAD_ROW_H // 2 + 10))
 
-    widths = [int(uw * f) for f in SCORE_COLS]
-    widths[-1] = uw - sum(widths[:-1])
-    edges = [x0]
-    for w in widths:
-        edges.append(edges[-1] + w)
-    zc = [(edges[i] + edges[i + 1]) // 2 for i in range(3)]
-    mid = (edges[2] + edges[3]) // 2
+    # Horizontal line under headers
+    pygame.draw.line(WIN, LINE_BLUE, (x0, t.y + HEAD_ROW_H), (xr, t.y + HEAD_ROW_H), 2)
 
-    # ---- header band
-    panel(pygame.Rect(x0, y0, uw, HEAD_ROW_H), (143, 89, 50, 232), radius=8)
-    pygame.draw.line(WIN, (96, 54, 24), (x0 + 8, y0 + HEAD_ROW_H - 1), (xr - 8, y0 + HEAD_ROW_H - 1), 2)
-    hy = y0 + HEAD_ROW_H // 2
-    for x, label in ((zc[0], "RESULT"), (zc[1], "MODE"), (mid, "SCORE")):
-        text_center(SMALL_FONT, label, (255, 240, 212), (x, hy), shadow=True)
+    # Vertical lines (drawn once, mula sa ilalim ng title area hanggang ibaba)
+    for v in vx:
+        pygame.draw.line(WIN, LINE_BLUE, (v, t.y + 12), (v, t.bottom - 12), 2)
 
-    # ---- rows
-    hover_row = -1
-    if x0 <= mouse[0] < xr and rows_top <= mouse[1] < bottom:
-        hover_row = (mouse[1] - rows_top + scroll_offset) // ROW_H
-
+    # scrollable rows
+    clip_rect = pygame.Rect(x0, t.y + HEAD_ROW_H + 1, uw + 2, t.height - HEAD_ROW_H - 14)
     old_clip = WIN.get_clip()
-    WIN.set_clip(pygame.Rect(x0, rows_top, uw + 2, SCORE_VIEW_H))
+    WIN.set_clip(clip_rect)
+
     for i, row in enumerate(SCORES[:MAX_ROWS]):
-        result, left, right, mode = row[:4]
-        top = rows_top + i * ROW_H - scroll_offset
-        if top + ROW_H <= rows_top or top >= bottom:
+        if len(row) == 4:
+            result, bot, player, mode = row
+        else:
+            result, bot, player, mode = "tie", 0, 0, "GOMA"
+
+        cy = t.y + HEAD_ROW_H + i * ROW_H + ROW_H // 2 - scroll_offset
+        line_y = t.y + HEAD_ROW_H + (i + 1) * ROW_H - scroll_offset
+
+        # Draw horizontal lines in between rows (pumapasok ito sa clip area kapag nag-scroll)
+        pygame.draw.line(WIN, LINE_BLUE, (x0, line_y), (xr, line_y), 2)
+
+        if cy < t.y + HEAD_ROW_H - ROW_H or cy > t.bottom + ROW_H:
             continue
-        cy = top + ROW_H // 2
+            
+        res_upper = str(result).upper()
+        is_pvp_row = str(result).lower() in ("p1", "p2", "ptie")
+        if is_pvp_row:                       # PvP row: P1 (left) vs P2 (right)
+            res_txt = "TIE" if str(result).lower() == "ptie" else res_upper
+            color = BROWN if str(result).lower() == "ptie" else (0, 160, 40)
+            left_name, right_name = "P1", "P2"
+        else:
+            res_txt = res_upper
+            if "WIN" in res_upper:
+                color = (0, 160, 40)   # Green for WIN
+            elif "DEFEAT" in res_upper:
+                color = (230, 40, 40)  # Red for DEFEAT
+            else:
+                color = BROWN          # Brown for TIE
+            left_name, right_name = "BOT", "PLAYER"
 
-        if i % 2 == 1:                                              # zebra stripes
-            panel(pygame.Rect(x0, top, uw, ROW_H), (255, 255, 255, 46), radius=0)
-        if i == hover_row:                                          # row under the mouse
-            panel(pygame.Rect(x0, top, uw, ROW_H), (255, 233, 168, 110), radius=0)
-        if i == 0:                                                  # newest match
-            pygame.draw.rect(WIN, (226, 170, 52), (x0, top + 2, 4, ROW_H - 4))
-        pygame.draw.line(WIN, (222, 188, 174), (x0, top + ROW_H), (xr, top + ROW_H), 1)
+        short_mode = "GOMA" if "KARERA" in str(mode).upper() else "POGS"
+        
+        # Mga text sa loob ng bawat row na naka-center sa saktong columns
+        text_center(SMALL_FONT, res_txt, color, (cx[0], cy))
+        text_center(SMALL_FONT, str(bot), BROWN, (cx[1], cy))
+        text_center(SMALL_FONT, left_name, BROWN, (cx[2], cy))
+        text_center(SMALL_FONT, str(player), BROWN, (cx[3], cy))
+        text_center(SMALL_FONT, right_name, BROWN, (cx[4], cy))
+        text_center(SMALL_FONT, short_mode, BROWN, (cx[5], cy))
 
-        key = str(result).lower()
-        if key == "loss":
-            key = "defeat"
-        label, color, left_name, right_name = SCORE_RESULTS.get(key, SCORE_RESULTS["tie"])
-        short_mode = "KARERA" if "KARERA" in str(mode).upper() else "POGS"
-
-        pill = score_pill(label, color, tuple(max(0, c - 60) for c in color))
-        WIN.blit(pill, pill.get_rect(center=(zc[0], cy)))
-
-        chip = score_pill(short_mode, (255, 250, 243, 170), (198, 158, 138),
-                          text_color=(112, 74, 50), pad=18, min_w=0, gloss=False)
-        WIN.blit(chip, chip.get_rect(center=(zc[1], cy)))
-
-        # scores: "BOT  3  -  1  PLAYER" with the winner in green
-        winner = {"win": "right", "defeat": "left", "p1": "left", "p2": "right"}.get(key, "")
-        col_win, col_lose = (26, 126, 52), (128, 92, 66)
-        lcol = col_win if winner == "left" else (col_lose if winner else BROWN)
-        rcol = col_win if winner == "right" else (col_lose if winner else BROWN)
-
-        lv = MID_FONT.render(str(left), True, lcol)
-        rv = MID_FONT.render(str(right), True, rcol)
-        ln = DESC_FONT.render(left_name, True, (128, 89, 64))
-        rn = DESC_FONT.render(right_name, True, (128, 89, 64))
-        gl, gr = mid - 30, mid + 30
-        WIN.blit(lv, lv.get_rect(midright=(gl, cy)))
-        WIN.blit(ln, ln.get_rect(midright=(gl - lv.get_width() - 8, cy)))
-        WIN.blit(rv, rv.get_rect(midleft=(gr, cy)))
-        WIN.blit(rn, rn.get_rect(midleft=(gr + rv.get_width() + 8, cy)))
-        pygame.draw.rect(WIN, (150, 108, 80), (mid - 9, cy - 2, 18, 4), border_radius=2)
     WIN.set_clip(old_clip)
 
-    if not SCORES:
-        text_center(MID_FONT, "NO MATCHES YET", BROWN,
-                    (t.centerx, rows_top + SCORE_VIEW_H // 2 - 12))
-        text_center(DESC_FONT, "play a game to build your record",
-                    (140, 100, 76), (t.centerx, rows_top + SCORE_VIEW_H // 2 + 16))
-
-    # ---- scrollbar
     content_h = len(SCORES[:MAX_ROWS]) * ROW_H
-    if content_h > SCORE_VIEW_H:
-        track = pygame.Rect(t.right - 22, rows_top + 2, 7, SCORE_VIEW_H - 4)
-        pygame.draw.rect(WIN, (223, 191, 179), track, border_radius=4)
-        thumb_h = max(30, int(track.h * SCORE_VIEW_H / content_h))
-        thumb_y = track.y + int((track.h - thumb_h) * scroll_offset / max(1, content_h - SCORE_VIEW_H))
-        pygame.draw.rect(WIN, (150, 100, 70), (track.x, thumb_y, track.w, thumb_h), border_radius=4)
+    view_h = t.height - HEAD_ROW_H
 
-    # ---- record summary, left of the BACK button
-    def _count(k):
-        return sum(1 for r in SCORES if str(r[0]).lower() == k)
-
-    summary = (f"{len(SCORES)} MATCHES    {_count('win')}W   "
-               f"{_count('defeat') + _count('loss')}L   {_count('tie')}T")
-    text_center(DESC_FONT, summary, (252, 238, 210),
-                ((t.x + SCORE_BACK.left) // 2, SCORE_BACK.centery), shadow=True)
-
+    if content_h > view_h:
+        text_center(DESC_FONT, "scroll with your mouse wheel", TEXT_COLOR,
+                    (t.x + 150, SCORE_BACK.centery), shadow=True)
     button(SCORE_BACK, "BACK", SCORE_BACK.collidepoint(mouse), MID_FONT)
 
 
@@ -2753,6 +3376,124 @@ def find_file(names):
         if n.lower() in have:
             return have[n.lower()]
     return None
+
+
+# ---------------------------------------------------------------------
+#  LEVEL LOGOS (visual only): each level has its own logo in the gold frame.
+#  EDIT THE FILE NAMES to match your PNGs (put your exact name FIRST in each list).
+#  Green = EASY, blue = MEDIUM, red = HARD. If a file is not found, a coloured
+#  shield is drawn instead so the game never crashes.
+# ---------------------------------------------------------------------
+LEVEL_LOGO_FILES = {
+    "EASY":   ["easy_logo.png", "easylogo.png", "logo_easy.png", "easy_icon.png", "easy_badge.png"],
+    "MEDIUM": ["medium_logo.png", "mediumlogo.png", "logo_medium.png", "medium_icon.png", "medium_badge.png"],
+    "HARD":   ["hard_logo.png", "hardlogo.png", "logo_hard.png", "hard_icon.png", "hard_badge.png"],
+}
+LEVEL_COLORS = {"EASY": (60, 200, 110), "MEDIUM": (60, 150, 230), "HARD": (230, 60, 50)}
+_LOGO_CACHE = {}
+
+
+LOGO_FRAME_FILES = ["buttonsize1.png", "logo_frame.png", "level_frame.png", "frame.png", "logoframe.png", "levelframe.png"]
+_LOGO_FRAMED = {}
+
+
+def _has_frame(pic):
+    """AUTO check: a picture that already contains its frame is an almost solid rectangle"""
+    if LOGO_HAS_FRAME is not None:
+        return LOGO_HAS_FRAME
+    m = pygame.mask.from_surface(pic, 10)
+    return m.count() / float(pic.get_width() * pic.get_height()) > 0.80
+
+
+LEVEL_KEYWORDS = {"EASY": ("easy",), "MEDIUM": ("medium", "meduim", "mid"), "HARD": ("hard",)}
+
+
+def auto_find_logo(name):
+    """if none of the names in LEVEL_LOGO_FILES exist, look for ANY png whose name contains the level word
+    (easy / medium / hard). The game's own button pictures are skipped."""
+    try:
+        files = [f for f in os.listdir(".") if f.lower().endswith(".png")]
+    except OSError:
+        return None
+    skip = {v.lower() for v in UI_FILES.values()} | {n.lower() for n in LOGO_FRAME_FILES}
+    found = [f for f in files
+             if f.lower() not in skip and "button" not in f.lower() and "hover" not in f.lower()
+             and any(k in f.lower() for k in LEVEL_KEYWORDS[name])]
+    if not found:
+        print(f"[dampa] level logo '{name}': no png with {LEVEL_KEYWORDS[name]} in its name. PNG files here: {sorted(files)}")
+        return None
+    found.sort(key=lambda f: (not any(w in f.lower() for w in ("logo", "icon", "badge", "emblem")), len(f)))
+    return found[0]
+
+
+def level_logo(name):
+    """returns the logo picture; _LOGO_FRAMED[name] tells if the picture already includes its frame"""
+    if name in _LOGO_CACHE:
+        return _LOGO_CACHE[name]
+    img = None
+    framed = False
+    fname = find_file(LEVEL_LOGO_FILES[name]) or auto_find_logo(name)
+    if fname:
+        pic = load_image(fname)
+        if pic is not None:
+            pic = crop_to_content(pic)
+            framed = _has_frame(pic)
+            iw, ih = (LOGO_FRAME.w, LOGO_FRAME.h) if framed else (LOGO_FRAME.w - 40, LOGO_FRAME.h - 40)
+            k = min(iw / pic.get_width(), ih / pic.get_height())
+            size = (max(1, int(pic.get_width() * k)), max(1, int(pic.get_height() * k)))
+            img = pygame.transform.smoothscale(pic, size) if k < 1 else pygame.transform.scale(pic, size)
+            print(f"[dampa] level logo '{name}': using {fname} ({'has its own frame' if framed else 'logo only -> frame is drawn'})")
+    else:
+        print(f"[dampa] level logo '{name}': NOT found, looked for {LEVEL_LOGO_FILES[name]}")
+    if img is None:                                   # placeholder shield
+        iw, ih = LOGO_FRAME.w - 40, LOGO_FRAME.h - 40
+        img = pygame.Surface((iw, ih), pygame.SRCALPHA)
+        pts = [(iw // 2, 4), (iw - 6, ih // 5), (iw - 14, ih * 3 // 4),
+               (iw // 2, ih - 4), (14, ih * 3 // 4), (6, ih // 5)]
+        pygame.draw.polygon(img, LEVEL_COLORS[name], pts)
+        pygame.draw.polygon(img, (20, 20, 30), pts, 5)
+        text_center(BIG_FONT, name[0], (20, 20, 30), (iw // 2, ih // 2), img)
+    _LOGO_CACHE[name] = img
+    _LOGO_FRAMED[name] = framed
+    return img
+
+
+def logo_frame_surface():
+    """the frame behind a logo-only picture: your logo_frame.png, or a drawn brown + yellow one"""
+    fr = LOGO_FRAME
+    k = ("logoframe", fr.size)
+    if k in _CARD_CACHE:
+        return _CARD_CACHE[k]
+    fname = find_file(LOGO_FRAME_FILES)
+    surf = None
+    if fname:
+        pic = load_image(fname)
+        if pic is not None:
+            surf = pygame.transform.scale(crop_to_content(pic), fr.size)
+    if surf is None:
+        surf = pygame.Surface(fr.size, pygame.SRCALPHA)
+        pygame.draw.rect(surf, (96, 48, 18), surf.get_rect(), border_radius=14)            # brown border
+        pygame.draw.rect(surf, (236, 170, 40), surf.get_rect().inflate(-14, -14), border_radius=8)   # yellow
+        pygame.draw.rect(surf, (255, 214, 90), surf.get_rect().inflate(-14, -14), 2, border_radius=8)  # shine
+    _CARD_CACHE[k] = surf
+    return surf
+
+
+def draw_level_logo(mouse):
+    """visual only: shows the logo of the hovered level, else the chosen level, else '?'"""
+    hov = next((n for n, r in LEVEL_RECTS.items() if r.collidepoint(mouse)), None)
+    name = hov or (DIFFICULTY if DIFF_CHOSEN else None)
+    fr = LOGO_FRAME
+    if name is not None:
+        img = level_logo(name)
+        if _LOGO_FRAMED.get(name):                       # the picture already has its own frame
+            WIN.blit(img, img.get_rect(center=fr.center))
+            return
+    WIN.blit(logo_frame_surface(), fr.topleft)
+    if name is None:
+        text_center(HUGE_FONT, "?", (86, 40, 14), fr.center)
+    else:
+        WIN.blit(img, img.get_rect(center=fr.center))
 
 
 def vs_card_surface(title, sub):
@@ -2868,11 +3609,12 @@ def draw_mode_select(mouse):
     if NOTICE[1] > 0:
         draw_notice((INFO_X + 170, 385), (255, 110, 90))
     else:
-        text_center(MID_FONT, "LEVEL DIFFICULTY", GOLD, (INFO_X + 135, 385), shadow=True)
+        text_center(MID_FONT, "LEVEL DIFICULTY", GOLD, (INFO_X + 135, 385), shadow=True)
     for name, r in LEVEL_RECTS.items():
         selected = DIFF_CHOSEN and DIFFICULTY == name
         button(r, name, r.collidepoint(mouse) or selected, MID_FONT)
 
+    draw_level_logo(mouse)                      # visual only: the logo of the level
     button(MODE_BACK, "BACK", MODE_BACK.collidepoint(mouse), MID_FONT)
 
 
@@ -2886,10 +3628,10 @@ def draw_hamburger(mouse):
     if pic is not None:
         WIN.blit(pic, r.topleft)                                      # YOUR hamburger picture
         return
-    s = pixel_box(r.w, r.h, (60, 25, 5), (139, 69, 19), (176, 102, 42), (104, 48, 12))
+    s = btn_surface(r.w, r.h, "gold")                                 # gold button with dark bars
     WIN.blit(s, s.get_rect(center=r.center))
     for i in range(3):
-        pygame.draw.rect(WIN, WHITE, (r.x + r.w // 5, r.y + r.h // 4 + i * (r.h // 5), r.w * 3 // 5, 4))
+        pygame.draw.rect(WIN, (30, 15, 5), (r.x + r.w // 5, r.y + r.h // 4 + i * (r.h // 5), r.w * 3 // 5, 5))
 
 
 def draw_pause(mouse, view, snap):
@@ -2912,8 +3654,39 @@ def draw_pause(mouse, view, snap):
 def scroll_scores(dy):
     global scroll_offset
     scroll_offset -= dy * SCROLL_SPEED
-    max_scroll = max(0, len(SCORES[:MAX_ROWS]) * ROW_H - SCORE_VIEW_H)
+    max_scroll = max(0, len(SCORES[:MAX_ROWS]) * ROW_H - (SCORE_TABLE.height - HEAD_ROW_H))
     scroll_offset = max(0, min(scroll_offset, max_scroll))
+
+
+# =====================================================================
+#  OPENING INTRO  (the first thing you see when the game starts)
+#  black screen -> the DAMPA letters fade in one by one -> menu + the home page music starts.
+#  Click or press any key to skip it.
+# =====================================================================
+INTRO_PRE = 0.4          # black screen before the DAMPA logo appears
+INTRO_DAMPA_IN = 1.1
+INTRO_DAMPA_HOLD = 0.6
+MENU_REVEAL = 1.2
+LETTER_STAGGER = 0.14
+T_DAMPA = INTRO_PRE
+INTRO_TOTAL = T_DAMPA + INTRO_DAMPA_IN + INTRO_DAMPA_HOLD
+
+
+def draw_intro(t):
+    WIN.fill((0, 0, 0))
+    if t < T_DAMPA:
+        return
+    if LETTERS:
+        for i, img in enumerate(LETTERS):
+            a = ease_out(clamp((t - T_DAMPA - i * LETTER_STAGGER) / (INTRO_DAMPA_IN - 4 * LETTER_STAGGER)))
+            tmp = img.copy()
+            tmp.fill((255, 255, 255, int(255 * a)), special_flags=pygame.BLEND_RGBA_MULT)
+            WIN.blit(tmp, LOGO_POS.move(0, int(24 * (1 - a))))
+        return
+    a = ease_out(clamp((t - T_DAMPA) / INTRO_DAMPA_IN))
+    tmp = LOGO.copy()
+    tmp.fill((255, 255, 255, int(255 * a)), special_flags=pygame.BLEND_RGBA_MULT)
+    WIN.blit(tmp, LOGO_POS)
 
 
 # =====================================================================
@@ -2921,7 +3694,8 @@ def scroll_scores(dy):
 # =====================================================================
 def main():
     global scroll_offset, SELECTED_MODE, DIFF_CHOSEN, PVP
-    screen = "menu"          # "menu" | "score" | "exit" | "gamemodes" | "game"
+    screen = "intro"         # "intro" | "menu" | "score" | "exit" | "gamemodes" | "game"
+    intro_t = 0.0
     prev_screen = screen
     game = None
     paused = False
@@ -2931,6 +3705,10 @@ def main():
     fade = 1.0               # quick fade-in whenever the screen changes
     fade_surf = pygame.Surface((WIDTH, HEIGHT))
     fade_surf.fill((0, 0, 0))
+    reveal = 1.0
+    logo_sfx_done = False
+    bgm_wait = None
+    countdown = None
 
     while run:
         dt = min(CLOCK.tick(60) / 1000.0, 0.05)
@@ -2938,17 +3716,27 @@ def main():
         if NOTICE[1] > 0:
             NOTICE[1] = max(0.0, NOTICE[1] - dt)
         mouse = pygame.mouse.get_pos()
+        MOUSE_MOVED[0] = pygame.mouse.get_rel() != (0, 0)
         AMBIENT.update(dt)
         update_confetti(dt)
-        update_dust(dt)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 run = False
                 continue
+            if event.type == MUSIC_END:
+                play_next_bgm()
+                continue
+
+            if screen == "intro":                         # any click / key skips the opening
+                if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
+                    intro_t = INTRO_TOTAL
+                continue
 
 # ---------------- IN GAME ----------------
             if screen == "game":
+                if countdown is not None and countdown < 3.0:
+                    continue
                 if not paused:
                     open_pause = (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE) or \
                                  (event.type == pygame.MOUSEBUTTONDOWN and event.button == 1
@@ -2958,9 +3746,6 @@ def main():
                         paused = True
                         pause_view = "menu"
                         snapshot = blur_surface(WIN)          # blurred copy of the game you were playing
-                    elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
-                        play("click")                         # R = restart the match
-                        game = Game(pvp=PVP) if isinstance(game, Game) else PogsGame(add_result)
                     elif game.handle_event(event) == "menu":
                         screen = "menu"
                         play_bgm("menu")
@@ -3021,14 +3806,17 @@ def main():
                 pos = event.pos
                 if screen == "menu":
                     if MENU_BUTTONS["GAMEMODES"].collidepoint(pos):
-                        play("click")
+                        play("menu_click")
+                        pygame.mixer.music.set_endevent()
+                        pygame.mixer.music.fadeout(400)
+                        bgm_wait = 0.5
                         screen = "gamemodes"
                     elif MENU_BUTTONS["SCORE"].collidepoint(pos):
-                        play("click")
+                        play("menu_click")
                         scroll_offset = 0
                         screen = "score"
                     elif MENU_BUTTONS["EXIT"].collidepoint(pos):
-                        play("click")
+                        play("menu_click")
                         screen = "exit"
                 elif screen == "gamemodes":
                     if VS_PVP.collidepoint(pos):
@@ -3054,9 +3842,23 @@ def main():
                         if srect.inflate(30, 30).collidepoint(pos):          # START button
                             SELECTED_MODE = key
                             handled = True
-                            if PVP and key == "pogs":
-                                play("miss")
-                                set_notice("POGS PVP: COMING SOON!")
+                            if key == "pogs" and PVP:
+                                # Player vs Player Pogs: no level required, both players play
+                                play("click")
+                                game = PogsGame(add_result, pvp=True)
+                                paused = False
+                                screen = "game"
+                                play_bgm("pogs")
+                            elif key == "pogs":
+                                if DIFF_CHOSEN:
+                                    play("click")
+                                    game = PogsGame(add_result)
+                                    paused = False
+                                    screen = "game"
+                                    play_bgm("pogs")
+                                else:
+                                    play("miss")
+                                    set_notice("PICK A LEVEL FIRST!")
                             elif DIFF_CHOSEN:
                                 play("click")
                                 game = Game(pvp=PVP) if key == "karera" else PogsGame(add_result)
@@ -3099,14 +3901,51 @@ def main():
                         play("click")
                         screen = "menu"
 
+        if screen == "intro":
+            intro_t += dt
+            if not logo_sfx_done and T_DAMPA <= intro_t < INTRO_TOTAL:
+                logo_appear_sound.play()
+                logo_sfx_done = True
+            if intro_t >= INTRO_TOTAL:
+                screen = "menu"
+                reveal = 0.0
+                play_bgm("menu")                          # home page music starts only after the intro
+
+        if bgm_wait is not None:
+            bgm_wait -= dt
+            if bgm_wait <= 0:
+                bgm_wait = None
+                play_next_bgm(600)
+
+        if reveal < 1.0:
+            reveal = min(1.0, reveal + dt / MENU_REVEAL)
+            if screen != "menu":
+                reveal = 1.0
+
+        if screen == "game" and prev_screen != "game":
+            countdown = 0.0
+            timer_sound.play()
+
+        if screen == "game" and countdown is not None and not paused:
+            old_count = countdown
+            countdown += dt
+            if int(countdown) != int(old_count) and countdown < 3.0:
+                timer_sound.play()
+            if old_count < 3.0 <= countdown:
+                go_sound.play()
+            if countdown >= 3.7:
+                countdown = None
+
         if screen != prev_screen:
-            fade = 1.0
+            fade = 0.0 if (prev_screen == "intro" and screen == "menu") else 1.0
             CONFETTI.clear()
             NOTICE[1] = 0.0
             prev_screen = screen
 
-        if screen == "menu":
-            draw_menu(mouse)
+        if screen == "intro":
+            draw_intro(intro_t)
+        elif screen == "menu":
+            draw_menu(mouse, reveal)
         elif screen == "score":
             draw_score(mouse)
         elif screen == "exit":
@@ -3119,13 +3958,16 @@ def main():
             if paused:
                 draw_pause(mouse, pause_view, snapshot)       # game is frozen: no update()
             else:
-                game.update(dt)
+                counting = countdown is not None and countdown < 3.0
+                if not counting:
+                    game.update(dt)
                 game.draw(mouse)
-                if game.phase != "end":
+                if countdown is not None:
+                    draw_countdown(countdown)
+                if game.phase != "end" and not counting:
                     draw_hamburger(mouse)
 
         draw_confetti(WIN)
-        draw_dust(WIN)
 
         if fade > 0:
             fade_surf.set_alpha(int(255 * fade))
