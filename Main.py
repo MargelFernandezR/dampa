@@ -3744,7 +3744,10 @@ def draw_intro(t):
     if not _INTRO_LOGO:
         img = load_first(INTRO_LOGO_FILES)
         if img is None:
-            img = pygame.image.load(io.BytesIO(base64.b64decode("".join(_INTRO_LOGO_B64.split())))).convert()
+            try:
+                img = pygame.image.load(io.BytesIO(base64.b64decode("".join(_INTRO_LOGO_B64.split())))).convert()
+            except (pygame.error, ValueError):
+                img = LOGO          # missing/corrupt intro logo: gamitin ang Dampa logo
         _INTRO_LOGO.append(img)
     logo = _INTRO_LOGO[0]
     sx, sy = WIDTH / 1280, HEIGHT / 720             # video space -> window space
