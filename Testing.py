@@ -47,7 +47,7 @@ def play_next_bgm(fade_ms=0):
     for track in choices:
         try:
             pygame.mixer.music.load(track)
-            pygame.mixer.music.set_volume(BGM_VOLUME)
+            pygame.mixer.music.set_volume(min(1.0, BGM_VOLUME))
             pygame.mixer.music.play(fade_ms=fade_ms)
             pygame.mixer.music.set_endevent(MUSIC_END)
             _last_bgm[0] = track
@@ -244,6 +244,59 @@ def play(name):
         s = SOUNDS.get(name)
         if s:
             s.play()
+
+
+# =====================================================================
+#  VOLUME SETTINGS  (BGM / SFX sliders, saved to settings.json)
+#  slider 0.5 (middle) = the volume the game had before. Right = louder, left = quieter.
+# =====================================================================
+SETTINGS_FILE = "settings.json"
+VOL = {"bgm": 0.5, "sfx": 0.5}
+BGM_BASE = 0.10
+SFX_BASE = [(click_sound, 0.2), (menu_click_sound, 0.5), (gamemode_click_sound, 0.5),
+            (logo_appear_sound, 0.6), (timer_sound, 0.5), (go_sound, 0.6)]
+
+
+def _curve(v, top):
+    """0..0.5 -> 0..1x (quieter), 0.5..1 -> 1x..top x (louder)"""
+    return v / 0.5 if v <= 0.5 else 1.0 + (v - 0.5) / 0.5 * (top - 1.0)
+
+
+def apply_volumes():
+    global BGM_VOLUME
+    BGM_VOLUME = BGM_BASE * _curve(VOL["bgm"], 4.0)          # max = 0.40
+    try:
+        pygame.mixer.music.set_volume(min(1.0, BGM_VOLUME))
+    except pygame.error:
+        pass
+    m = _curve(VOL["sfx"], 2.5)
+    for snd, base in SFX_BASE:
+        snd.set_volume(clamp(base * m))
+    for snd in SOUNDS.values():
+        if snd:
+            snd.set_volume(clamp(m))
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_FILE) as f:
+            d = json.load(f)
+        for k in VOL:
+            VOL[k] = clamp(float(d.get(k, VOL[k])))
+    except (OSError, ValueError, TypeError):
+        pass
+
+
+def save_settings():
+    try:
+        with open(SETTINGS_FILE, "w") as f:
+            json.dump(VOL, f)
+    except OSError:
+        pass
+
+
+load_settings()
+apply_volumes()
 
 
 # =====================================================================
@@ -638,6 +691,47 @@ YESNO_HOVER = (176, 124, 72)
 HUD_COLOR = (139, 69, 19)  # brown
 GOLD = (255, 240, 120)
 
+# ---------------------------------------------------------------------
+#  CHALK FINISH LINE (replaces the checkered line) - built ONCE, not every frame
+# ---------------------------------------------------------------------
+def make_chalk_line(width, seed=5):
+    """a hand-drawn chalk line in pixel style: wobbly, grainy, with a little dust"""
+    rnd = random.Random(seed)
+    P = 3                                            # one chalk "pixel" = 3x3 screen pixels
+    sw, sh = width // P + 1, 14
+    small = pygame.Surface((sw, sh), pygame.SRCALPHA)
+    wob = 0.0
+    for x in range(sw):
+        wob += rnd.uniform(-0.35, 0.35)              # the line drifts up and down a little
+        wob = max(-1.6, min(1.6, wob))
+        cy = sh // 2 + int(round(wob))
+        thick = rnd.choice((3, 4, 4, 5))
+        half = thick // 2
+        for dy in range(-half, half + 1):
+            edge = abs(dy) == half
+            if rnd.random() < (0.55 if edge else 0.93):          # gaps make it look like chalk
+                a = rnd.randint(120, 190) if edge else rnd.randint(205, 255)
+                small.set_at((x, cy + dy), (245, 245, 238, a))
+        if rnd.random() < 0.10:                                  # loose chalk dust
+            small.set_at((x, cy + rnd.choice((-4, -3, 3, 4))), (240, 240, 235, rnd.randint(70, 140)))
+    return pygame.transform.scale(small, (sw * P, sh * P))
+
+
+def make_chalk_text(text, font):
+    """white chalk writing: normal pixel text with little scratches taken out of it"""
+    img = font.render(text, True, (245, 245, 238)).copy()        # copy: the font keeps its own cached picture
+    rnd = random.Random(8)
+    w, h = img.get_size()
+    for _ in range(w * h // 9):
+        x, y = rnd.randrange(w), rnd.randrange(h)
+        if img.get_at((x, y))[3] > 0:
+            img.set_at((x, y), (245, 245, 238, rnd.randint(0, 90)))
+    return img
+
+
+CHALK_LINE = make_chalk_line(HALF)
+CHALK_TEXT = make_chalk_text("FINISH", SMALL_FONT)
+
 
 def panel(rect, color=BEIGE, target=None, radius=14):
     """a see-through panel with smooth rounded corners"""
@@ -980,29 +1074,31 @@ TIPS = [
 PANEL_W = 472
 PANEL_X = (WIDTH - PANEL_W) // 2
 
-# --- SCORE layout: wood board + paper + sign, each its own picture.
-#     The three pieces are placed by ratios of the wood board, so any picture size works.
-SCORE_WOOD_W = 720                                           # width of the wooden board on screen
-_wood_h = int(SCORE_WOOD_W / ui_aspect("score_wood", 735 / 430))
-_sgn_w = int(SCORE_WOOD_W * 0.36)
-_sgn_h = int(_sgn_w / ui_aspect("score_sign", 262 / 178))
+# --- SCORE layout: gold SCORE pill (top-left) + pink paper board + gold BACK (bottom-right)
+_hdr_h0, _gap_top, _gap_bot, _back_h = 64, 14, 18, 54
+_asp = ui_aspect("score_paper", 2.04)
+SCORE_PAPER_W = min(800, int((HEIGHT - 40 - _hdr_h0 - _gap_top - _gap_bot - _back_h) * _asp))   # always fits the screen
+_paper_h = int(SCORE_PAPER_W / _asp)
+_hdr_w = int(SCORE_PAPER_W * 0.39)
+_hdr_h = max(44, min(80, int(_hdr_w / ui_aspect("button", 4.3))))
+_back_w = int(SCORE_PAPER_W * 0.29)
 SCORE_SHIFT = (0, 0)          # nudge the WHOLE score screen: (+right / -left, +down / -up)
-_sign_over = max(0, _sgn_h - int(_wood_h * 0.15) + 6)        # how far the sign sticks out above the wood
-_score_total = _sign_over + _wood_h + 20 + 54                # sign top -> bottom of the BACK button
-SCORE_BOARD = pygame.Rect(0, 0, SCORE_WOOD_W, _wood_h)
-SCORE_BOARD.centerx = WIDTH // 2 + SCORE_SHIFT[0]
-SCORE_BOARD.y = max(8, (HEIGHT - _score_total) // 2) + _sign_over + SCORE_SHIFT[1]   # whole group centred
-SCORE_TABLE = pygame.Rect(SCORE_BOARD.x + int(SCORE_WOOD_W * 0.11), SCORE_BOARD.y + int(_wood_h * 0.15),
-                          int(SCORE_WOOD_W * 0.79), int(_wood_h * 0.70))      # the paper
-SCORE_SIGN = pygame.Rect(SCORE_BOARD.x + int(SCORE_WOOD_W * 0.07), SCORE_TABLE.y + 6 - _sgn_h, _sgn_w, _sgn_h)
-SCORE_PLANK = pygame.Rect(SCORE_SIGN.x, SCORE_SIGN.y + int(_sgn_h * 0.30), _sgn_w, int(_sgn_h * 0.70))  # (drawn version only)
-SCORE_BACK = pygame.Rect(SCORE_TABLE.right - 160, SCORE_BOARD.bottom + 20, 160, 54)
+_score_total = _hdr_h + _gap_top + _paper_h + _gap_bot + _back_h
+
+SCORE_TABLE = pygame.Rect(0, 0, SCORE_PAPER_W, _paper_h)                       # the pink paper
+SCORE_TABLE.centerx = WIDTH // 2 + SCORE_SHIFT[0]
+SCORE_TABLE.y = (HEIGHT - _score_total) // 2 + _hdr_h + _gap_top + SCORE_SHIFT[1]
+SCORE_SIGN = pygame.Rect(SCORE_TABLE.x, SCORE_TABLE.y - _gap_top - _hdr_h, _hdr_w, _hdr_h)   # gold SCORE pill
+SCORE_BACK = pygame.Rect(SCORE_TABLE.right - _back_w, SCORE_TABLE.bottom + _gap_bot, _back_w, _back_h)
+# the cream table that sits on the paper (same proportions as your reference picture)
+SCORE_TB = pygame.Rect(SCORE_TABLE.x + int(SCORE_PAPER_W * 0.065), SCORE_TABLE.y + int(_paper_h * 0.06),
+                       int(SCORE_PAPER_W * 0.885), int(_paper_h * 0.87))
 COL_STREAK = 110
 COL_BOT = 70
 COL_YOU = 70
 COL_GAMEMODES = 270
 HEAD_ROW_H = 45
-ROW_H = 40
+ROW_H = 28
 MAX_ROWS = 20
 SCROLL_SPEED = 40        # pixels per scroll
 scroll_offset = 0        # current scroll position
@@ -1026,11 +1122,34 @@ EXIT_YES.center = (EXIT_PANEL.centerx, EXIT_PANEL.y + int(_ex_ph * 0.55))
 EXIT_NO = pygame.Rect(0, 0, _btn_w, _btn_h)
 EXIT_NO.center = (EXIT_PANEL.centerx, EXIT_YES.centery + _btn_h + 14)
 
-# in-game pause menu
+# in-game pause menu (matches the reference mockup)
 PAUSE_BTN = pygame.Rect(WIDTH - 84, 12, 66, 62)          # the hamburger button (bigger, like the reference)
-PAUSE_PANEL = pygame.Rect(WIDTH // 2 - 190, 140, 380, 420)
-PAUSE_BUTTONS = {name: pygame.Rect(WIDTH // 2 - 150, 192 + i * 84, 300, 64)
-                 for i, name in enumerate(("CONTINUE", "SCORE", "MENU", "EXIT"))}
+PAUSE_PANEL = pygame.Rect(WIDTH // 2 - 190, 115, 380, 470)
+PAUSE_BUTTONS = {}
+for _i, _name in enumerate(("CONTINUE", "SCORE", "MENU", "EXIT")):
+    _r = pygame.Rect(0, 0, 277, 62)
+    _r.midtop = (PAUSE_PANEL.centerx, PAUSE_PANEL.y + 56 + _i * 79)
+    PAUSE_BUTTONS[_name] = _r
+
+# ---- settings gear (main menu = right of EXIT, pause menu = bottom of the paper)
+GEAR_MENU = pygame.Rect(0, 0, 64, 64)
+GEAR_MENU.center = (MENU_BUTTONS["EXIT"].right + 16 + 32, MENU_BUTTONS["EXIT"].centery)
+GEAR_PAUSE = pygame.Rect(0, 0, 60, 60)
+GEAR_PAUSE.center = (PAUSE_PANEL.centerx, PAUSE_PANEL.y + 400)
+
+# ---- SETTINGS screen (image 4)
+SET_PAPER = pygame.Rect(0, 0, 360, 300)
+_set_hh, _set_lap = 60, 12
+SET_PAPER.centerx = WIDTH // 2
+SET_PAPER.y = (HEIGHT - (_set_hh - _set_lap + SET_PAPER.h)) // 2 + _set_hh - _set_lap
+SET_HEADER = pygame.Rect(0, 0, 300, _set_hh)
+SET_HEADER.midbottom = (SET_PAPER.centerx, SET_PAPER.y + _set_lap)
+SET_SLIDERS = {
+    "bgm": pygame.Rect(SET_PAPER.x + 112, SET_PAPER.y + 81 - 16, 219, 32),
+    "sfx": pygame.Rect(SET_PAPER.x + 112, SET_PAPER.y + 126 - 16, 219, 32),
+}
+SET_BACK = pygame.Rect(0, 0, 260, 56)
+SET_BACK.center = (SET_PAPER.centerx, SET_PAPER.y + 204)
 
 
 # =====================================================================
@@ -1792,14 +1911,11 @@ class Game:
                 ly = (i * 191 + int(st * 1400)) % HEIGHT
                 surf.blit(SPEED_LINE, (lx, ly))
 
-        # finish line: very far away, off-screen until the floor has scrolled almost all the way
+        # finish line: a chalk line drawn on the floor
         fy = int(BAND_START_Y - FINISH_DIST + scroll)
         if -30 < fy < HEIGHT:
-            for i, x in enumerate(range(0, HALF, 26)):
-                for row in range(2):
-                    color = (255, 255, 255) if (i + row) % 2 == 0 else (20, 20, 20)
-                    pygame.draw.rect(surf, color, (x, fy - 13 + row * 13, 26, 13))
-            text_center(SMALL_FONT, "FINISH", TEXT_COLOR, (cx, fy + 26), surf, shadow=True)
+            surf.blit(CHALK_LINE, (0, fy - CHALK_LINE.get_height() // 2))
+            surf.blit(CHALK_TEXT, CHALK_TEXT.get_rect(center=(cx, fy + 28)))
 
         # progress bar towards the finish line
         bar = pygame.Rect(HALF - 26 if is_player else 14, 110, 12, 440)
@@ -1866,10 +1982,10 @@ class Game:
         # ===== NEW HUD (gold pills, same layout as the reference image) =====
         n = min(self.round, ROUNDS)
         # left = BOT, right = PLAYER
-        hud_pill(WIN, HUD_L_LABEL, "P1 WINS" if self.pvp else "ROUND WINS")
+        hud_pill(WIN, HUD_L_LABEL, "PLAYER1" if self.pvp else "ROUND WINS")
         hud_pill(WIN, pygame.Rect(HUD_L_VALUE.right - 140, HUD_L_VALUE.y, 140, 34), f"SCORE:{self.bot_wins}")
         hud_pill(WIN, HUD_ROUND, f"ROUND {n}", TITLE_FONT)
-        hud_pill(WIN, HUD_R_LABEL, "P2 WINS" if self.pvp else "ROUND WINS")
+        hud_pill(WIN, HUD_R_LABEL, "PLAYER2" if self.pvp else "ROUND WINS")
         hud_pill(WIN, pygame.Rect(HUD_R_VALUE.x, HUD_R_VALUE.y, 140, 34), f"SCORE:{self.player_wins}")
 
         # timer pill (the pink-circle spot under the ROUND pill)
@@ -2416,7 +2532,7 @@ class PogsGame:
             p1, p2 = self.pogs["player1"], self.pogs["player2"]
             self.final = "p1" if p1 > p2 else "p2" if p2 > p1 else "ptie"
             if not self.saved and self.on_finish:
-                self.on_finish(p1, p2, "DAMPA POGS", result=self.final)
+                self.on_finish(p2, p1, "DAMPA POGS", result=self.final)
         else:
             p, b = self.pogs["player"], self.pogs["bot"]
             self.final = "win" if p > b else "loss" if p < b else "tie"
@@ -3139,6 +3255,7 @@ def draw_menu(mouse, reveal=1.0):
     text_center(SMALL_FONT, TIPS[(now // 4000) % len(TIPS)], GOLD, (WIDTH // 2, 26), shadow=True)
     for label, rect in MENU_BUTTONS.items():
         button(rect, "SCORES" if label == "SCORE" else label, rect.collidepoint(mouse))
+    draw_gear(GEAR_MENU, "menu", mouse)                      # settings gear (right of EXIT)
     y = HEIGHT - 75
     for line in DESCRIPTION:
         text_center(DESC_FONT, line, TEXT_COLOR, (WIDTH // 2, y), shadow=True)
@@ -3166,106 +3283,95 @@ def draw_countdown(c):
 
 def draw_score(mouse, bg=None):
     backdrop(bg)
-    t = SCORE_TABLE
+    TB = SCORE_TB
 
-    wood = ui_img("score_wood", SCORE_BOARD.size)
-    if wood is not None:
-        WIN.blit(wood, SCORE_BOARD.topleft)                           # YOUR wood board
-    else:
-        b = wood_box(SCORE_BOARD.w, SCORE_BOARD.h, (214, 160, 96), 8, (96, 44, 20))
-        WIN.blit(b, b.get_rect(center=SCORE_BOARD.center))
-        nail(SCORE_BOARD.right - 14, SCORE_BOARD.y + 14)
-        nail(SCORE_BOARD.x + 14, SCORE_BOARD.bottom - 14)
-        nail(SCORE_BOARD.right - 14, SCORE_BOARD.bottom - 14)
-    paper = ui_img("score_paper", t.size)
+    # pink paper board (your score_boarder.png)
+    paper = ui_img("score_paper", SCORE_TABLE.size)
     if paper is not None:
-        WIN.blit(paper, t.topleft)                                    # YOUR paper
+        WIN.blit(paper, SCORE_TABLE.topleft)
     else:
-        paper_box(t)
-    sign = ui_img("score_sign", SCORE_SIGN.size)
-    if sign is not None:
-        WIN.blit(sign, SCORE_SIGN.topleft)                            # YOUR SCORE sign
-    else:
-        draw_sign(SCORE_PLANK, "SCORE")
+        paper_box(SCORE_TABLE)
 
-    # table area = the paper minus a small margin (and the scroll strip on the right)
-    x0 = t.x + 20
-    uw = t.width - 50
+    # gold SCORE pill, top-left
+    hud_pill(WIN, SCORE_SIGN, "SCORE", BIG_FONT)
+
+    x0, uw = TB.x, TB.w
     xr = x0 + uw
-    
-    # 6 columns distribution para sakto sa reference image
-    cw = [int(uw * 0.26), int(uw * 0.08), int(uw * 0.20), int(uw * 0.08), int(uw * 0.20), int(uw * 0.18)]
-    cx = [x0 + sum(cw[:i]) + cw[i] // 2 for i in range(6)]
-    vx = [x0 + sum(cw[:i+1]) for i in range(5)]
+    GREEN_TXT, RED_TXT = (0, 160, 40), (255, 70, 70)
+    MODE_SHORT = {"DAMPA KARERA": "GOMA", "DAMPA POGS": "POGS"}   # change "GOMA" to "KARERA" if you prefer
 
-    # header row (does not scroll)
-    text_center(SMALL_FONT, "STREAK", BROWN, (cx[0], t.y + HEAD_ROW_H // 2))
-    text_center(SMALL_FONT, "ENEMYMODE", BROWN, ((cx[1] + cx[4]) // 2, t.y + HEAD_ROW_H // 2))
-    # Stacked ang GAME MODES tulad sa picture
-    text_center(DESC_FONT, "GAME", BROWN, (cx[5], t.y + HEAD_ROW_H // 2 - 10))
-    text_center(DESC_FONT, "MODES", BROWN, (cx[5], t.y + HEAD_ROW_H // 2 + 10))
+    # 6 columns: STREAK | score | name | score | name | GAME MODES
+    cw = [int(uw * 0.25), int(uw * 0.05), int(uw * 0.27), int(uw * 0.05), int(uw * 0.24)]
+    cw.append(uw - sum(cw))
+    edges = [x0 + sum(cw[:i]) for i in range(7)]
+    cx = [edges[i] + cw[i] // 2 for i in range(6)]
 
-    # Horizontal line under headers
-    pygame.draw.line(WIN, LINE_BLUE, (x0, t.y + HEAD_ROW_H), (xr, t.y + HEAD_ROW_H), 2)
+    def fit(text, col_w, color, center):
+        font = SMALL_FONT
+        if font.render(text, True, color).get_width() > col_w - 8:
+            font = DESC_FONT
+        text_center(font, text, color, center)
 
-    # Vertical lines (drawn once, mula sa ilalim ng title area hanggang ibaba)
-    for v in vx:
-        pygame.draw.line(WIN, LINE_BLUE, (v, t.y + 12), (v, t.bottom - 12), 2)
+    # cream sheet
+    pygame.draw.rect(WIN, (250, 238, 226), TB)
+
+    # header (does not scroll)
+    hy = TB.y + HEAD_ROW_H // 2
+    text_center(SMALL_FONT, "STREAK", BROWN, (cx[0], hy))
+    text_center(SMALL_FONT, "ENEMYMODE", BROWN, ((edges[1] + edges[5]) // 2, hy))
+    text_center(DESC_FONT, "GAME", BROWN, (cx[5], hy - 10))
+    text_center(DESC_FONT, "MODES", BROWN, (cx[5], hy + 10))
+    pygame.draw.line(WIN, LINE_BLUE, (x0, TB.y + HEAD_ROW_H), (xr, TB.y + HEAD_ROW_H), 2)
+
+    # vertical lines: the two outer ones go through the header, the inner three start below it
+    for v in (edges[1], edges[5]):
+        pygame.draw.line(WIN, LINE_BLUE, (v, TB.y), (v, TB.bottom), 2)
+    for v in (edges[2], edges[3], edges[4]):
+        pygame.draw.line(WIN, LINE_BLUE, (v, TB.y + HEAD_ROW_H), (v, TB.bottom), 2)
 
     # scrollable rows
-    clip_rect = pygame.Rect(x0, t.y + HEAD_ROW_H + 1, uw + 2, t.height - HEAD_ROW_H - 14)
     old_clip = WIN.get_clip()
-    WIN.set_clip(clip_rect)
+    WIN.set_clip(pygame.Rect(x0, TB.y + HEAD_ROW_H + 1, uw, TB.h - HEAD_ROW_H - 1))
 
     for i, row in enumerate(SCORES[:MAX_ROWS]):
-        if len(row) == 4:
-            result, bot, player, mode = row
-        else:
-            result, bot, player, mode = "tie", 0, 0, "GOMA"
-
-        cy = t.y + HEAD_ROW_H + i * ROW_H + ROW_H // 2 - scroll_offset
-        line_y = t.y + HEAD_ROW_H + (i + 1) * ROW_H - scroll_offset
-
-        # Draw horizontal lines in between rows (pumapasok ito sa clip area kapag nag-scroll)
-        pygame.draw.line(WIN, LINE_BLUE, (x0, line_y), (xr, line_y), 2)
-
-        if cy < t.y + HEAD_ROW_H - ROW_H or cy > t.bottom + ROW_H:
+        if len(row) != 4:
             continue
-            
-        res_upper = str(result).upper()
-        is_pvp_row = str(result).lower() in ("p1", "p2", "ptie")
-        if is_pvp_row:                       # PvP row: P1 (left) vs P2 (right)
-            res_txt = "TIE" if str(result).lower() == "ptie" else res_upper
-            color = BROWN if str(result).lower() == "ptie" else (0, 160, 40)
-            left_name, right_name = "P1", "P2"
-        else:
-            res_txt = res_upper
-            if "WIN" in res_upper:
-                color = (0, 160, 40)   # Green for WIN
-            elif "DEFEAT" in res_upper:
-                color = (230, 40, 40)  # Red for DEFEAT
-            else:
-                color = BROWN          # Brown for TIE
-            left_name, right_name = "BOT", "PLAYER"
+        result, left, right, mode = row
+        cy = TB.y + HEAD_ROW_H + i * ROW_H + ROW_H // 2 - scroll_offset
+        line_y = TB.y + HEAD_ROW_H + (i + 1) * ROW_H - scroll_offset
+        pygame.draw.line(WIN, LINE_BLUE, (x0, line_y), (xr, line_y), 2)
+        if cy < TB.y + HEAD_ROW_H - ROW_H or cy > TB.bottom + ROW_H:
+            continue
 
-        short_mode = "GOMA" if "KARERA" in str(mode).upper() else "POGS"
-        
-        # Mga text sa loob ng bawat row na naka-center sa saktong columns
-        text_center(SMALL_FONT, res_txt, color, (cx[0], cy))
-        text_center(SMALL_FONT, str(bot), BROWN, (cx[1], cy))
-        text_center(SMALL_FONT, left_name, BROWN, (cx[2], cy))
-        text_center(SMALL_FONT, str(player), BROWN, (cx[3], cy))
-        text_center(SMALL_FONT, right_name, BROWN, (cx[4], cy))
-        text_center(SMALL_FONT, short_mode, BROWN, (cx[5], cy))
+        res = str(result).lower()
+        if res in ("p1", "p2", "ptie"):                  # PLAYER VS PLAYER
+            left_name, right_name = "PLAYER1", "PLAYER2"
+            res_txt = {"p1": "PLAYER1 WIN", "p2": "PLAYER2 WIN", "ptie": "P1 TIE P2"}[res]
+            color = BROWN if res == "ptie" else GREEN_TXT
+        else:                                            # PLAYER VS BOT
+            left_name, right_name = "BOT", "PLAYER"
+            res_txt = {"win": "WIN", "defeat": "DEFEAT", "tie": "TIE"}.get(res, res.upper())
+            color = GREEN_TXT if res == "win" else RED_TXT if res == "defeat" else BROWN
+
+        fit(res_txt, cw[0], color, (cx[0], cy))
+        text_center(SMALL_FONT, str(left), BROWN, (cx[1], cy))
+        text_center(DESC_FONT, left_name, BROWN, (cx[2], cy))
+        text_center(SMALL_FONT, str(right), BROWN, (cx[3], cy))
+        text_center(DESC_FONT, right_name, BROWN, (cx[4], cy))
+        fit(MODE_SHORT.get(str(mode).upper(), "GOMA"), cw[5], BROWN, (cx[5], cy))
 
     WIN.set_clip(old_clip)
 
+    # little brown scroll thumb on the right edge (only when there are more rows than fit)
     content_h = len(SCORES[:MAX_ROWS]) * ROW_H
-    view_h = t.height - HEAD_ROW_H
-
+    view_h = TB.h - HEAD_ROW_H
     if content_h > view_h:
-        text_center(DESC_FONT, "scroll with your mouse wheel", TEXT_COLOR,
-                    (t.x + 150, SCORE_BACK.centery), shadow=True)
+        track_y, track_h = TB.y + 6, TB.h - 12
+        th = max(30, int(track_h * view_h / content_h))
+        max_scroll = content_h - view_h
+        ty = track_y + int((track_h - th) * scroll_offset / max_scroll)
+        pygame.draw.rect(WIN, (125, 85, 70), (TB.right - 4, ty, 8, th), border_radius=3)
+
     button(SCORE_BACK, "BACK", SCORE_BACK.collidepoint(mouse), MID_FONT)
 
 
@@ -3298,6 +3404,167 @@ def draw_exit(mouse, bg=None):
     no_hot = EXIT_NO.collidepoint(mouse) or not yes_hot
     button(EXIT_YES, "YES", yes_hot, SMALL_FONT, key="exit_yes")
     button(EXIT_NO, "NO", no_hot, SMALL_FONT, key="exit_no")
+
+
+# ---------------------------------------------------------------------
+#  SETTINGS GEAR  (hover = grows + turns + brightens, click = squash + snap-turn,
+#                  mouse pointer turns into a hand)
+# ---------------------------------------------------------------------
+GEAR_FILES = ["settings_logo.png", "settings_logo.png", "settings_logo.png", "settings_logo.png",
+              "settings_logo.png", "settings_logo.png", "settings_logo.png"]   # put YOUR file name first
+_GEAR = {}
+GEAR_DOWN = [None]
+GEAR_ANIM = {}
+HAND_HOT = [False]
+_CUR = [False]
+SET_DRAG = [None]
+
+
+def gear_raw():
+    if "img" not in _GEAR:
+        img = None
+        fname = find_file(GEAR_FILES)
+        if fname:
+            pic = load_image(fname)
+            if pic is not None:
+                img = crop_to_content(pic)
+        if img is None:                                   # drawn fallback
+            img = pygame.Surface((96, 96), pygame.SRCALPHA)
+            c = (48, 48)
+            pygame.draw.circle(img, (70, 28, 8), c, 46)
+            pygame.draw.circle(img, (226, 128, 36), c, 43)
+            pygame.draw.circle(img, (250, 196, 64), c, 36)
+            for k in range(8):
+                a = k * math.pi / 4
+                pygame.draw.circle(img, (255, 244, 214), (int(48 + math.cos(a) * 21), int(48 + math.sin(a) * 21)), 7)
+            pygame.draw.circle(img, (255, 244, 214), c, 20)
+            pygame.draw.circle(img, (226, 128, 36), c, 9)
+        _GEAR["img"] = img
+    return _GEAR["img"]
+
+
+def draw_gear(rect, tag, mouse):
+    hov = rect.collidepoint(mouse)
+    a = hover_amt(("gear", tag), hov)
+    if hov:
+        HAND_HOT[0] = True
+    pressed = GEAR_DOWN[0] == tag and hov
+    p = GEAR_ANIM.get(tag, 0.0)
+    p += ((1.0 if pressed else 0.0) - p) * min(1.0, FX_DT[0] * 24)
+    GEAR_ANIM[tag] = p
+
+    scale = 1.0 + 0.14 * a - 0.24 * p                     # hover grows, click squashes
+    base = gear_raw()
+    w = max(8, int(rect.w * scale))
+    h = max(8, int(w * base.get_height() / base.get_width()))
+    img = pygame.transform.smoothscale(base, (w, h))
+    ang = -(45.0 * a + 70.0 * p)                          # hover turns the cog, click snaps it further
+    if abs(ang) > 0.5:
+        img = pygame.transform.rotozoom(img, ang, 1.0)
+    if a > 0.02:                                          # brighter on hover
+        img = img.copy()
+        g = int(55 * a)
+        img.fill((g, g, g, 0), special_flags=pygame.BLEND_RGB_ADD)
+    sh = silhouette(img, 90)
+    WIN.blit(sh, sh.get_rect(center=(rect.centerx + 3, rect.centery + 4)))
+    WIN.blit(img, img.get_rect(center=rect.center))
+
+
+def update_cursor(hand):
+    if _CUR[0] != hand:
+        _CUR[0] = hand
+        try:
+            pygame.mouse.set_cursor(pygame.SYSTEM_CURSOR_HAND if hand else pygame.SYSTEM_CURSOR_ARROW)
+        except (pygame.error, AttributeError):
+            pass
+
+
+# ---------------------------------------------------------------------
+#  SETTINGS SCREEN
+# ---------------------------------------------------------------------
+def _slider_lohi(r):
+    return r.x + 22, r.right - 22
+
+
+def _slider_value(name, x):
+    lo, hi = _slider_lohi(SET_SLIDERS[name])
+    return clamp((x - lo) / float(hi - lo))
+
+
+def draw_slider(r, value, hot):
+    img = ui_img("button", r.size)
+    if img is not None:
+        WIN.blit(img, r.topleft)
+    else:
+        s = btn_surface(r.w, r.h, "gold")
+        WIN.blit(s, s.get_rect(center=r.center))
+    g = pygame.Rect(r.x + 14, 0, r.w - 28, 9)
+    g.centery = r.centery
+    pygame.draw.rect(WIN, (52, 44, 44), g, border_radius=5)
+    pygame.draw.rect(WIN, (30, 22, 20), g, 2, border_radius=5)
+    lo, hi = _slider_lohi(r)
+    kx, ky = int(lo + (hi - lo) * value), r.centery
+    rad = 12 if hot else 11
+    pygame.draw.circle(WIN, (60, 30, 20), (kx + 2, ky + 3), rad)
+    pygame.draw.circle(WIN, (70, 28, 8), (kx, ky), rad)
+    pygame.draw.circle(WIN, (252, 236, 200), (kx, ky), rad - 2)
+    pygame.draw.circle(WIN, (255, 252, 240), (kx - 3, ky - 3), 3)
+
+
+def draw_settings(mouse, bg=None):
+    if bg is None:
+        WIN.blit(BG_BLUR, (0, 0))
+    else:
+        backdrop(bg)
+    paper = ui_img("pause_panel", SET_PAPER.size)
+    if paper is not None:
+        WIN.blit(paper, SET_PAPER.topleft)
+    else:
+        paper_box(SET_PAPER)
+    banner = ui_img("button", SET_HEADER.size)
+    if banner is not None:
+        WIN.blit(banner, SET_HEADER.topleft)
+    else:
+        s = btn_surface(SET_HEADER.w, SET_HEADER.h, "gold")
+        WIN.blit(s, s.get_rect(center=SET_HEADER.center))
+    text_center(BIG_FONT, "SETTINGS", BTN_PAL["gold"][0], SET_HEADER.center)
+
+    for name, label in (("bgm", "BGM"), ("sfx", "SFX")):
+        r = SET_SLIDERS[name]
+        img = MID_FONT.render(label, True, BROWN)
+        WIN.blit(img, img.get_rect(midleft=(SET_PAPER.x + int(SET_PAPER.w * 0.09), r.centery)))
+        hot = SET_DRAG[0] == name or r.inflate(0, 16).collidepoint(mouse)
+        if hot:
+            HAND_HOT[0] = True
+        draw_slider(r, VOL[name], hot)
+    button(SET_BACK, "BACK", SET_BACK.collidepoint(mouse), MID_FONT, key="set_back")
+
+
+def settings_event(event):
+    """returns 'back' when the settings should close"""
+    if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+        save_settings()
+        return "back"
+    if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+        for name, r in SET_SLIDERS.items():
+            if r.inflate(0, 16).collidepoint(event.pos):
+                SET_DRAG[0] = name
+                VOL[name] = _slider_value(name, event.pos[0])
+                apply_volumes()
+                return None
+        if SET_BACK.collidepoint(event.pos):
+            play("click")
+            save_settings()
+            return "back"
+    elif event.type == pygame.MOUSEMOTION and SET_DRAG[0]:
+        VOL[SET_DRAG[0]] = _slider_value(SET_DRAG[0], event.pos[0])
+        apply_volumes()
+    elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and SET_DRAG[0]:
+        if SET_DRAG[0] == "sfx":
+            play("click")                      # let the player hear the new SFX volume
+        SET_DRAG[0] = None
+        save_settings()
+    return None
 
 
 # ---------------------------------------------------------------------
@@ -3640,6 +3907,8 @@ def draw_pause(mouse, view, snap):
         draw_score(mouse, snap)
     elif view == "exit":
         draw_exit(mouse, snap)
+    elif view == "settings":
+        draw_settings(mouse, snap)
     else:
         backdrop(snap)
         pic = ui_img("pause_panel", PAUSE_PANEL.size)
@@ -3649,12 +3918,13 @@ def draw_pause(mouse, view, snap):
             paper_box(PAUSE_PANEL)
         for name, r in PAUSE_BUTTONS.items():
             button(r, name, r.collidepoint(mouse), MID_FONT)
+        draw_gear(GEAR_PAUSE, "pause", mouse)
 
 
 def scroll_scores(dy):
     global scroll_offset
     scroll_offset -= dy * SCROLL_SPEED
-    max_scroll = max(0, len(SCORES[:MAX_ROWS]) * ROW_H - (SCORE_TABLE.height - HEAD_ROW_H))
+    max_scroll = max(0, len(SCORES[:MAX_ROWS]) * ROW_H - (SCORE_TB.height - HEAD_ROW_H))
     scroll_offset = max(0, min(scroll_offset, max_scroll))
 
 
@@ -3694,12 +3964,12 @@ def draw_intro(t):
 # =====================================================================
 def main():
     global scroll_offset, SELECTED_MODE, DIFF_CHOSEN, PVP
-    screen = "intro"         # "intro" | "menu" | "score" | "exit" | "gamemodes" | "game"
+    screen = "intro"         # "intro" | "menu" | "score" | "exit" | "settings" | "gamemodes" | "game"
     intro_t = 0.0
     prev_screen = screen
     game = None
     paused = False
-    pause_view = "menu"      # "menu" | "score" | "exit"
+    pause_view = "menu"      # "menu" | "score" | "exit" | "settings"
     snapshot = None
     run = True
     fade = 1.0               # quick fade-in whenever the screen changes
@@ -3733,6 +4003,22 @@ def main():
                     intro_t = INTRO_TOTAL
                 continue
 
+            # gear click = press on it, release on it (so the squash animation is visible)
+            if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+                gd, GEAR_DOWN[0] = GEAR_DOWN[0], None
+                if gd == "menu" and screen == "menu" and GEAR_MENU.collidepoint(event.pos):
+                    screen = "settings"
+                    continue
+                if gd == "pause" and screen == "game" and paused and pause_view == "menu" \
+                        and GEAR_PAUSE.collidepoint(event.pos):
+                    pause_view = "settings"
+                    continue
+
+            if screen == "settings":
+                if settings_event(event) == "back":
+                    screen = "menu"
+                continue
+
 # ---------------- IN GAME ----------------
             if screen == "game":
                 if countdown is not None and countdown < 3.0:
@@ -3749,6 +4035,16 @@ def main():
                     elif game.handle_event(event) == "menu":
                         screen = "menu"
                         play_bgm("menu")
+                    continue
+
+                if pause_view == "settings":
+                    if settings_event(event) == "back":
+                        pause_view = "menu"
+                    continue
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and pause_view == "menu" \
+                        and GEAR_PAUSE.collidepoint(event.pos):
+                    play("click")
+                    GEAR_DOWN[0] = "pause"
                     continue
 
                 # paused: CONTINUE / SCORE / MENU / EXIT
@@ -3818,6 +4114,9 @@ def main():
                     elif MENU_BUTTONS["EXIT"].collidepoint(pos):
                         play("menu_click")
                         screen = "exit"
+                    elif GEAR_MENU.collidepoint(pos):
+                        play("menu_click")
+                        GEAR_DOWN[0] = "menu"
                 elif screen == "gamemodes":
                     if VS_PVP.collidepoint(pos):
                         play("click")
@@ -3950,6 +4249,8 @@ def main():
             draw_score(mouse)
         elif screen == "exit":
             draw_exit(mouse)
+        elif screen == "settings":
+            draw_settings(mouse)
         elif screen == "gamemodes":
             draw_vs_select(mouse)
         elif screen == "botmodes":
@@ -3973,6 +4274,9 @@ def main():
             fade_surf.set_alpha(int(255 * fade))
             WIN.blit(fade_surf, (0, 0))
             fade = max(0.0, fade - dt * 4.5)
+
+        update_cursor(HAND_HOT[0])      # mouse pointer becomes a hand over the gear / sliders
+        HAND_HOT[0] = False
 
         pygame.display.update()
 
