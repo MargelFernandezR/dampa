@@ -404,7 +404,7 @@ _small = pygame.transform.smoothscale(BG, (WIDTH // 14, HEIGHT // 14))
 BG_BLUR = pygame.transform.smoothscale(_small, (WIDTH, HEIGHT))
 
 LOGO_W = 720
-_logo = load_image("DampaLogo.png")
+_logo = load_image("Dampa.png")
 if _logo:
     LOGO_H = int(_logo.get_height() * LOGO_W / _logo.get_width())
     LOGO = pygame.transform.smoothscale(_logo, (LOGO_W, LOGO_H))
