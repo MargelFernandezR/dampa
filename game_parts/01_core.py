@@ -75,11 +75,18 @@ HALF = WIDTH // 2
 
 
 # ---------------------------------------------------------------------
-#  WINDOW ICON + BLACK TITLE BAR
+#  CUSTOM BLACK TITLE BAR (kapalit ng blue na title bar ng Windows)
 #  Ilagay ang "Capture-removebg-preview.png" sa parehong folder ng main.py
 # ---------------------------------------------------------------------
+TITLE_H = 32                    # taas ng black title bar
+TITLE_BG = (0, 0, 0)
+TB_BTN_W = 46                   # lapad ng minimize / close button
+TITLE_ICON = None
+
+
 def set_window_icon(filename="Capture-removebg-preview.png"):
-    """palitan ang icon sa kaliwang taas ng window (dapat tawagin BAGO ang set_mode)"""
+    """icon ng taskbar + maliit na icon sa black title bar (dapat tawagin BAGO ang set_mode)"""
+    global TITLE_ICON
     try:
         icon = pygame.image.load(filename)
         rect = icon.get_bounding_rect()                       # alisin ang transparent na gilid
@@ -88,42 +95,86 @@ def set_window_icon(filename="Capture-removebg-preview.png"):
         side = max(icon.get_size())                           # gawing square para hindi pipi
         sq = pygame.Surface((side, side), pygame.SRCALPHA)
         sq.blit(icon, ((side - icon.get_width()) // 2, (side - icon.get_height()) // 2))
-        icon = pygame.transform.smoothscale(sq, (64, 64))
-        pygame.display.set_icon(icon)
+        pygame.display.set_icon(pygame.transform.smoothscale(sq, (64, 64)))
+        TITLE_ICON = pygame.transform.smoothscale(sq, (18, 18))
     except (pygame.error, FileNotFoundError):
         print(f"[dampa] could not load window icon '{filename}'")
 
 
-def set_black_titlebar():
-    """gawing itim ang blue na title bar / border ng window (Windows lang)"""
+set_window_icon()
+# NOFRAME = walang Windows title bar. Mas mataas ang window ng TITLE_H, at ang WIN (game area)
+# ay nasa ibaba ng title bar, kaya hindi na kailangang galawin ang ibang drawing code.
+SCREEN = pygame.display.set_mode((WIDTH, HEIGHT + TITLE_H), pygame.NOFRAME)
+WIN = SCREEN.subsurface((0, TITLE_H, WIDTH, HEIGHT))
+pygame.display.set_caption("DAMPA")
+TB_FONT = pygame.font.Font(None, 24)      # (TB_FONT, hindi TITLE_FONT: may TITLE_FONT na sa 02_assets_ui)
+TB_CLOSE = pygame.Rect(WIDTH - TB_BTN_W, 0, TB_BTN_W, TITLE_H)
+TB_MIN = pygame.Rect(WIDTH - TB_BTN_W * 2, 0, TB_BTN_W, TITLE_H)
+
+
+def drag_window():
+    """hayaang i-drag ang window gamit ang black title bar (Windows)"""
     if sys.platform != "win32":
         return
     try:
         import ctypes
         from ctypes import wintypes
+        user32 = ctypes.windll.user32
+        user32.SendMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
         hwnd = pygame.display.get_wm_info()["window"]
-        dwm = ctypes.windll.dwmapi
-        dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD,
-                                              ctypes.c_void_p, wintypes.DWORD]
-
-        def set_attr(attr, value):
-            v = ctypes.c_int(value)
-            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
-
-        set_attr(20, 1)            # dark mode title bar (Windows 10 20H1+ / Windows 11)
-        set_attr(19, 1)            # dark mode title bar (mas lumang Windows 10)
-        set_attr(34, 0x00000000)   # border color = black   (Windows 11)
-        set_attr(35, 0x00000000)   # title bar color = black (Windows 11)
-        set_attr(36, 0x00FFFFFF)   # title text color = white (Windows 11)
+        user32.ReleaseCapture()
+        user32.SendMessageW(hwnd, 0x00A1, 2, 0)               # WM_NCLBUTTONDOWN + HTCAPTION
     except Exception as e:
-        print("[dampa] could not change title bar color:", e)
+        print("[dampa] could not drag window:", e)
 
 
-set_window_icon()                                   # 1) icon muna, bago ang window
-pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)   # 2) gawin ang window
-set_black_titlebar()                                # 3) saka gawing black ang title bar
-WIN = pygame.Surface((WIDTH, HEIGHT))
-pygame.display.set_caption("DAMPA")
+def handle_titlebar_event(event):
+    """Tinatawag sa bawat event. Returns "close", "skip" o None.
+    - "close" = pinindot ang X
+    - "skip"  = nasa title bar ang mouse, huwag nang ipasa sa game
+    Ibinababa rin nito ang mouse position ng TITLE_H para tama pa rin ang lahat ng click sa game."""
+    if event.type not in (pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION):
+        return None
+    x, y = event.pos
+    if y < TITLE_H:
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if TB_CLOSE.collidepoint(x, y):
+                return "close"
+            if TB_MIN.collidepoint(x, y):
+                pygame.display.iconify()
+            else:
+                drag_window()
+        return "skip"
+    event.pos = (x, y - TITLE_H)
+    return None
+
+
+def get_game_mouse():
+    """mouse position na nakabase sa game area (wala ang title bar)"""
+    x, y = pygame.mouse.get_pos()
+    return (x, y - TITLE_H)
+
+
+def draw_titlebar():
+    mx, my = pygame.mouse.get_pos()
+    pygame.draw.rect(SCREEN, TITLE_BG, (0, 0, WIDTH, TITLE_H))
+    x = 10
+    if TITLE_ICON:
+        SCREEN.blit(TITLE_ICON, (x, (TITLE_H - TITLE_ICON.get_height()) // 2))
+        x += TITLE_ICON.get_width() + 8
+    label = TB_FONT.render("DAMPA", True, (255, 255, 255))
+    SCREEN.blit(label, (x, (TITLE_H - label.get_height()) // 2))
+    if TB_MIN.collidepoint(mx, my):
+        pygame.draw.rect(SCREEN, (55, 55, 55), TB_MIN)
+    if TB_CLOSE.collidepoint(mx, my):
+        pygame.draw.rect(SCREEN, (232, 17, 35), TB_CLOSE)
+    cy = TITLE_H // 2
+    pygame.draw.line(SCREEN, (255, 255, 255), (TB_MIN.centerx - 6, cy), (TB_MIN.centerx + 5, cy), 1)
+    cx = TB_CLOSE.centerx
+    pygame.draw.line(SCREEN, (255, 255, 255), (cx - 6, cy - 6), (cx + 5, cy + 5), 1)
+    pygame.draw.line(SCREEN, (255, 255, 255), (cx - 6, cy + 5), (cx + 5, cy - 6), 1)
+
+
 CLOCK = pygame.time.Clock()
 
 
@@ -132,9 +183,10 @@ def window_to_canvas(pos):
     if display is None:
         return 0, 0
     display_width, display_height = display.get_size()
-    if display_width <= 0 or display_height <= 0:
+    if display_width <= 0 or display_height <= TITLE_H:
         return 0, 0
-    return int(pos[0] * WIDTH / display_width), int(pos[1] * HEIGHT / display_height)
+    return (int(pos[0] * WIDTH / display_width),
+            int((pos[1] - TITLE_H) * HEIGHT / (display_height - TITLE_H)))
 
 
 # =====================================================================

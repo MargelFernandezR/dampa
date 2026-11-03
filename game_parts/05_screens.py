@@ -761,20 +761,23 @@ def main():
         FX_DT[0] = dt
         if NOTICE[1] > 0:
             NOTICE[1] = max(0.0, NOTICE[1] - dt)
-        mouse = window_to_canvas(pygame.mouse.get_pos())
+        mouse = get_game_mouse()
         MOUSE_MOVED[0] = pygame.mouse.get_rel() != (0, 0)
         AMBIENT.update(dt)
         update_confetti(dt)
 
         for event in pygame.event.get():
-            if hasattr(event, "pos"):
-                event = pygame.event.Event(
-                    event.type,
-                    {**event.dict, "pos": window_to_canvas(event.pos)},
-                )
             if event.type == pygame.QUIT:
                 run = False
                 continue
+
+            tb = handle_titlebar_event(event)
+            if tb == "close":
+                run = False
+                continue
+            if tb == "skip":
+                continue
+
             if event.type == MUSIC_END:
                 play_next_bgm()
                 continue
@@ -1059,12 +1062,8 @@ def main():
         update_cursor(HAND_HOT[0])      # mouse pointer becomes a hand over the gear / sliders
         HAND_HOT[0] = False
 
-        display = pygame.display.get_surface()
-        if display is not None:
-            display_size = display.get_size()
-            if display_size[0] > 0 and display_size[1] > 0:
-                pygame.transform.scale(WIN, display_size, display)
-                pygame.display.update()
+        draw_titlebar()
+        pygame.display.update()
 
     pygame.quit()
     sys.exit()
