@@ -701,7 +701,7 @@ DESCRIPTION = [
 
 TIPS = [
     "TIP: stop the bar on the WHITE zone for full power!",
-    "TIP: in Dampa Pogs, aim for the green box (80-90%)!",
+    "TIP: in Dampa Pogs, aim for the box (80-90%)!",
     "TIP: too much power in Pogs = you lose control!",
     "TIP: in Pogs, click every circle after the meter or lose power!",
     "TIP: press ESC anytime to pause the game",

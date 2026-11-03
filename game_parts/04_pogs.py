@@ -37,6 +37,18 @@ HAND_X = {"player": CX, "bot": CX}  # both hands sit in the middle-bottom
 
 IDEAL_LO, IDEAL_HI = 0.80, 0.90     # the "sweet spot" of the power meter
 
+# ---- Dampa Pogs HUD layout (gold pills, copied from the Canva mockup) ----
+#     (pogs-only: the Karera's HUD_ROUND / HUD_TIMER in 02_assets_ui are left untouched)
+HUD_BOT_NAME    = pygame.Rect(CX - 382, 10, 180, 36)
+HUD_BOT_POGS    = pygame.Rect(CX - 382, 50, 180, 36)
+HUD_PG_ROUND    = pygame.Rect(CX - 190, 10, 380, 76)
+HUD_PG_TIMER    = pygame.Rect(CX - 70, 92, 140, 28)
+HUD_PLAYER_NAME = pygame.Rect(CX + 202, 10, 180, 36)
+HUD_PLAYER_POGS = pygame.Rect(CX + 202, 50, 180, 36)
+HUD_STACK       = pygame.Rect(WIDTH - 340, HEIGHT - 84, 320, 64)
+BAR_W, BAR_H, BAR_Y = 220, 18, 530    # power bar (sits beside the hands)
+BAR_GAP = 160                         # space between the bar and the hands
+
 # strength -> chance that each pog in the stack flips
 #   0-25% weak | 26-50% normal | 51-75% strong | 76-95% powerful (80-90 best) | 96-100% overcharge
 FLIP_CURVE = [(0.00, 0.03), (0.25, 0.15), (0.50, 0.30), (0.75, 0.50),
@@ -695,9 +707,11 @@ class PogsGame:
     # ---------------------------------------------------------- circle-click challenge
     def pick_target_pos(self, prev):
         """a random spot anywhere on screen that does not hide the HUD"""
-        avoid = [pygame.Rect(250, 8, 800, 160), pygame.Rect(0, 150, 215, 125),
-                 pygame.Rect(WIDTH - 215, 150, 215, 125), pygame.Rect(CX - 300, 150, 600, 140),
-                 pygame.Rect(290, 520, 260, 120), pygame.Rect(750, 520, 260, 120),
+        avoid = [pygame.Rect(CX - 390, 0, 780, 130),            # top pills (BOT / ROUND / TIMER / PLAYER)
+                 HUD_STACK.inflate(20, 20),                      # STACK pill
+                 pygame.Rect(150, 480, 270, 140),                # player power bar
+                 pygame.Rect(880, 480, 270, 140),                # bot power bar
+                 pygame.Rect(CX - 250, 115, 500, 110),           # big messages (PERFECT POWER! etc.)
                  PAUSE_BTN.inflate(40, 40)]
         for _ in range(80):
             x = random.randint(TARGET_R + 40, WIDTH - TARGET_R - 40)
@@ -1040,6 +1054,13 @@ class PogsGame:
         img = font.render(text, True, WHITE)
         surf.blit(img, img.get_rect(midleft=(rect.x + 14, rect.centery)))
 
+    def pill(self, surf, rect, text, font=None):
+        """gold pixel pill (same look as the menu buttons) with centered dark-brown text"""
+        font = font or self.f_hud
+        img = btn_surface(rect.w, rect.h, "gold")
+        surf.blit(img, img.get_rect(center=rect.center))
+        self.text(surf, font, text, BTN_PAL["gold"][0], rect.center, shadow=False)
+
     def text(self, surf, font, txt, color, center, shadow=True, alpha=255):
         img = font.render(txt, True, color)
         sh = font.render(txt, True, (0, 0, 0))
@@ -1053,75 +1074,63 @@ class PogsGame:
             surf.blit(sh, (r.x + 3, r.y + 3))
         surf.blit(img, r)
 
-    def draw_bar(self, surf, x, y, label):
-        """power bar like the reference: red track + green power fill"""
+    def draw_bar(self, surf, side):
+        """power bar: YOU / BOT label on top, red bar, green fill, blinking sweet-spot box"""
         m = self.meter
-        w, h = 230, 14
-        self.text(surf, self.f_mid, label, WHITE, (x + w // 2, y - 20))
-        pygame.draw.rect(surf, (0, 0, 0), (x - 3, y - 3, w + 6, h + 6))
-        pygame.draw.rect(surf, (240, 60, 40), (x, y, w, h))                 # red track
+        w, h, y = BAR_W, BAR_H, BAR_Y
+        x = HAND_X[side] - BAR_GAP - w if side == "player" else HAND_X[side] + BAR_GAP
+        if self.pvp:
+            self.text(surf, self.f_mid, "P1" if side == "player" else "P2", WHITE, (x + w // 2, y - 22))
+        else:
+            self.text(surf, self.f_mid, "YOU" if side == "player" else "BOT", WHITE, (x + w // 2, y - 22))
+        pygame.draw.rect(surf, (0, 0, 0), (x - 3, y - 3, w + 6, h + 6), border_radius=4)
+        pygame.draw.rect(surf, (235, 60, 40), (x, y, w, h))                  # red = empty part
         fill = int(w * clamp(m.pos))
         if fill > 0:
-            col = (255, 150, 40) if m.pos > 0.95 else (60, 230, 50)         # green power fill
+            col = (255, 140, 30) if m.pos > 0.95 else (60, 230, 50)          # orange = overcharge
             pygame.draw.rect(surf, col, (x, y, fill, h))
         # the sweet spot (80-90%) - blinks while the player is aiming
-        if self.pvp:
-            blink_on_turn = (self.turn == "player1" or self.turn == "player2")
-        else:
-            blink_on_turn = (self.turn == "player")
-        blink = not (blink_on_turn and self.phase == "meter" and int(self.t * 5) % 2 == 0)
-        pygame.draw.rect(surf, (255, 235, 90) if blink else (255, 255, 255),
-                         (x + int(IDEAL_LO * w), y - 5, int((IDEAL_HI - IDEAL_LO) * w), h + 10), 2)
-        pygame.draw.line(surf, (255, 255, 255), (x + fill, y - 4), (x + fill, y + h + 4), 3)
-        self.text(surf, self.f_small, f"{int(m.pos * 100)}%", WHITE, (x + w // 2, y + h + 16))
-        if blink_on_turn and self.phase == "meter":
-            if self.pvp:
-                self.text(surf, self.f_small, "[Q] STOP IN GREEN BOX" if self.turn == "player1" else "[P] STOP IN GREEN BOX", WHITE, (x + w // 2, y + h + 38))
-            else:
-                self.text(surf, self.f_small, "[SPACE] STOP IN GREEN BOX", WHITE, (x + w // 2, y + h + 38))
+        blink = self.turn == "player" and self.phase == "meter" and int(self.t * 5) % 2 == 0
+        pygame.draw.rect(surf, WHITE if blink else (255, 215, 60),
+                         (x + int(IDEAL_LO * w) - 1, y - 4, int((IDEAL_HI - IDEAL_LO) * w) + 2, h + 8), 2)
+        pygame.draw.line(surf, WHITE, (x + fill, y - 5), (x + fill, y + h + 5), 3)
+        self.text(surf, self.f_small, f"{int(m.pos * 100)}%", WHITE, (x + w // 2, y + h + 18))
+        if self.turn == "player" and self.phase == "meter":
+            self.text(surf, self.f_small, "[SPACE] stop in the box!", WHITE, (x + w // 2, y + h + 40))
+        elif self.pvp and self.phase == "meter":
+            self.text(surf, self.f_small, "[Q] stop in the box!" if self.turn == "player1" else "[P] stop in the box!",
+                      WHITE, (x + w // 2, y + h + 40))
 
     def draw_hud(self, surf):
-        hud_pill(surf, HUD_ROUND, f"ROUND {self.round}", TITLE_FONT)
-        if self.pvp:
-            hud_pill(surf, HUD_L_LABEL, "P1")
-            hud_pill(surf, HUD_L_VALUE, f"{self.pogs['player1']} POGS")
-            hud_pill(surf, HUD_R_LABEL, "P2")
-            hud_pill(surf, HUD_R_VALUE, f"{self.pogs['player2']} POGS")
-            # the two pills on each side: FLIP + STACK
-            for rects, who in ((HUD_SIDE_L, "player1"), (HUD_SIDE_R, "player2")):
-                hud_pill(surf, rects[0], f"FLIP: {self.last_flip[who]}")
-                hud_pill(surf, rects[1], f"STACK: {self.stack}")
-        else:
-            hud_pill(surf, HUD_L_LABEL, "BOT")
-            hud_pill(surf, HUD_L_VALUE, f"{self.pogs['bot']} POGS")
-            hud_pill(surf, HUD_R_LABEL, "PLAYER")
-            hud_pill(surf, HUD_R_VALUE, f"{self.pogs['player']} POGS")
-            # the two pills on each side: FLIP + STACK
-            for rects, who in ((HUD_SIDE_L, "bot"), (HUD_SIDE_R, "player")):
-                hud_pill(surf, rects[0], f"FLIP: {self.last_flip[who]}")
-                hud_pill(surf, rects[1], f"STACK: {self.stack}")
+        def pogs_txt(n):
+            return f"{n} POG" if n == 1 else f"{n} POGS"
 
-        # timer pill (under the ROUND pill)
-        t_txt = ""
-        if self.phase == "transition":
-            t_txt = f"TIME: {int(TURN_TIME)}"
-        elif self.phase == "meter":
-            t_txt = f"TIME: {int(math.ceil(max(0.0, TURN_TIME - self.t)))}"
-        hud_pill(surf, HUD_TIMER, t_txt)
-
-        if self.phase in ("end", "transition"):
-            return
-        # power bar for the current turn
-        if self.pvp:
-            if self.turn == "player1":
-                self.draw_bar(surf, CX - 360, 560, "P1")      # left of the hands
-            else:
-                self.draw_bar(surf, CX + 130, 560, "P2")      # right of the hands
+        if self.pvp:                       # PvP: P1 left, P2 right (same layout as the mockup)
+            l_name, l_pogs = "P1", self.pogs["player1"]
+            r_name, r_pogs = "P2", self.pogs["player2"]
         else:
-            if self.turn == "player":
-                self.draw_bar(surf, CX - 360, 560, "YOU")      # left of the hands
-            else:
-                self.draw_bar(surf, CX + 130, 560, "BOT")      # right of the hands
+            l_name, l_pogs = "BOT", self.pogs["bot"]
+            r_name, r_pogs = "PLAYER", self.pogs["player"]
+
+        # top-left: BOT / P1
+        self.pill(surf, HUD_BOT_NAME, l_name)
+        self.pill(surf, HUD_BOT_POGS, pogs_txt(l_pogs))
+        # top-right: PLAYER / P2
+        self.pill(surf, HUD_PLAYER_NAME, r_name)
+        self.pill(surf, HUD_PLAYER_POGS, pogs_txt(r_pogs))
+        # top-center: ROUND + TIMER
+        self.pill(surf, HUD_PG_ROUND, f"ROUND {self.round}", self.f_big)
+        if self.phase == "meter":
+            timer_txt = f"TIMER: {int(math.ceil(max(0.0, TURN_TIME - self.t)))}"
+        else:
+            timer_txt = "TIMER"
+        self.pill(surf, HUD_PG_TIMER, timer_txt, self.f_small)
+        # bottom-right: STACK
+        self.pill(surf, HUD_STACK, f"STACK: {self.stack}", self.f_big)
+        # power bar beside the hands of whoever is playing
+        if self.phase not in ("end", "transition"):
+            side = "player" if self.turn in ("player", "player1") else "bot"
+            self.draw_bar(surf, side)
 
     def draw_messages(self, surf):
         if self.phase == "transition":
