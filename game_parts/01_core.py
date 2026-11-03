@@ -102,14 +102,52 @@ def set_window_icon(filename="Capture-removebg-preview.png"):
 
 
 set_window_icon()
-# NOFRAME = walang Windows title bar. Mas mataas ang window ng TITLE_H, at ang WIN (game area)
-# ay nasa ibaba ng title bar, kaya hindi na kailangang galawin ang ibang drawing code.
-SCREEN = pygame.display.set_mode((WIDTH, HEIGHT + TITLE_H), pygame.NOFRAME)
-WIN = SCREEN.subsurface((0, TITLE_H, WIDTH, HEIGHT))
+# NOFRAME = walang Windows title bar, pero RESIZABLE pa rin: pwede pa ring i-drag ang gilid,
+# i-maximize at palakihin ang window. Kailangan ng SDL hint na ito, kung hindi hindi
+# naglalagay ng resize frame (WS_THICKFRAME) ang SDL sa borderless window.
+os.environ["SDL_BORDERLESS_RESIZABLE_STYLE"] = "1"
+SCREEN = pygame.display.set_mode((WIDTH, HEIGHT + TITLE_H), pygame.NOFRAME | pygame.RESIZABLE)
+# WIN = laging 1300x700 ang laro; ini-scale lang ito sa laki ng window (tingnan ang present()).
+WIN = pygame.Surface((WIDTH, HEIGHT))
 pygame.display.set_caption("DAMPA")
 TB_FONT = pygame.font.Font(None, 24)      # (TB_FONT, hindi TITLE_FONT: may TITLE_FONT na sa 02_assets_ui)
-TB_CLOSE = pygame.Rect(WIDTH - TB_BTN_W, 0, TB_BTN_W, TITLE_H)
-TB_MIN = pygame.Rect(WIDTH - TB_BTN_W * 2, 0, TB_BTN_W, TITLE_H)
+_SCALED = None
+
+
+def tb_close_rect():
+    return pygame.Rect(SCREEN.get_width() - TB_BTN_W, 0, TB_BTN_W, TITLE_H)
+
+
+def tb_max_rect():
+    return pygame.Rect(SCREEN.get_width() - TB_BTN_W * 2, 0, TB_BTN_W, TITLE_H)
+
+
+def tb_min_rect():
+    return pygame.Rect(SCREEN.get_width() - TB_BTN_W * 3, 0, TB_BTN_W, TITLE_H)
+
+
+def is_maximized():
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        hwnd = pygame.display.get_wm_info()["window"]
+        return bool(ctypes.windll.user32.IsZoomed(hwnd))
+    except Exception:
+        return False
+
+
+def toggle_maximize():
+    """i-maximize / i-restore ang window (Windows lang)"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        hwnd = pygame.display.get_wm_info()["window"]
+        user32.ShowWindow(hwnd, 9 if user32.IsZoomed(hwnd) else 3)   # SW_RESTORE / SW_MAXIMIZE
+    except Exception as e:
+        print("[dampa] could not maximize window:", e)
 
 
 def drag_window():
@@ -128,6 +166,71 @@ def drag_window():
         print("[dampa] could not drag window:", e)
 
 
+_RESIZE_PROC = None          # hawakan ang reference para hindi i-free ng Python ang callback
+_RESIZE_OLD_PROC = None
+
+
+def enable_edge_resize():
+    """NOFRAME window = walang resize border. Sariling WM_NCHITTEST para kayang hilahin ang gilid."""
+    global _RESIZE_PROC, _RESIZE_OLD_PROC
+    if sys.platform != "win32" or _RESIZE_PROC is not None:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        user32 = ctypes.windll.user32
+
+        WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
+                                     wintypes.WPARAM, wintypes.LPARAM)
+        user32.CallWindowProcW.restype = ctypes.c_ssize_t
+        user32.CallWindowProcW.argtypes = [ctypes.c_void_p, wintypes.HWND, wintypes.UINT,
+                                           wintypes.WPARAM, wintypes.LPARAM]
+        user32.SetWindowLongPtrW.restype = ctypes.c_void_p
+        user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_void_p]
+        user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
+        user32.IsZoomed.argtypes = [wintypes.HWND]
+
+        hwnd = pygame.display.get_wm_info()["window"]
+        GWLP_WNDPROC = -4
+        WM_NCHITTEST = 0x0084
+        BORDER = 6
+
+        def wndproc(h, msg, wparam, lparam):
+            if msg == WM_NCHITTEST and not user32.IsZoomed(h):
+                x = ctypes.c_short(lparam & 0xFFFF).value
+                y = ctypes.c_short((lparam >> 16) & 0xFFFF).value
+                r = wintypes.RECT()
+                user32.GetWindowRect(h, ctypes.byref(r))
+                left, right = x < r.left + BORDER, x >= r.right - BORDER
+                top, bottom = y < r.top + BORDER, y >= r.bottom - BORDER
+                if top and left:
+                    return 13                       # HTTOPLEFT
+                if top and right:
+                    return 14                       # HTTOPRIGHT
+                if bottom and left:
+                    return 16                       # HTBOTTOMLEFT
+                if bottom and right:
+                    return 17                       # HTBOTTOMRIGHT
+                if left:
+                    return 10                       # HTLEFT
+                if right:
+                    return 11                       # HTRIGHT
+                if top:
+                    return 12                       # HTTOP
+                if bottom:
+                    return 15                       # HTBOTTOM
+            return user32.CallWindowProcW(_RESIZE_OLD_PROC, h, msg, wparam, lparam)
+
+        _RESIZE_PROC = WNDPROC(wndproc)
+        _RESIZE_OLD_PROC = user32.SetWindowLongPtrW(
+            hwnd, GWLP_WNDPROC, ctypes.cast(_RESIZE_PROC, ctypes.c_void_p))
+    except Exception as e:
+        print("[dampa] edge resize not available:", e)
+
+
+enable_edge_resize()
+
+
 def handle_titlebar_event(event):
     """Tinatawag sa bawat event. Returns "close", "skip" o None.
     - "close" = pinindot ang X
@@ -138,39 +241,65 @@ def handle_titlebar_event(event):
     x, y = event.pos
     if y < TITLE_H:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if TB_CLOSE.collidepoint(x, y):
+            if tb_close_rect().collidepoint(x, y):
                 return "close"
-            if TB_MIN.collidepoint(x, y):
+            if tb_max_rect().collidepoint(x, y):
+                toggle_maximize()
+            elif tb_min_rect().collidepoint(x, y):
                 pygame.display.iconify()
             else:
                 drag_window()
         return "skip"
-    event.pos = (x, y - TITLE_H)
+    event.pos = window_to_canvas((x, y))
     return None
 
 
 def get_game_mouse():
-    """mouse position na nakabase sa game area (wala ang title bar)"""
-    x, y = pygame.mouse.get_pos()
-    return (x, y - TITLE_H)
+    """mouse position na nakabase sa game area (wala ang title bar, naka-scale sa window)"""
+    return window_to_canvas(pygame.mouse.get_pos())
+
+
+def present():
+    """i-scale ang 1300x700 na WIN sa ilalim ng title bar (umaayon sa laki ng window)"""
+    global _SCALED
+    sw, sh = SCREEN.get_size()
+    area = (max(1, sw), max(1, sh - TITLE_H))
+    if _SCALED is None or _SCALED.get_size() != area:
+        _SCALED = pygame.Surface(area)
+    pygame.transform.scale(WIN, area, _SCALED)
+    SCREEN.blit(_SCALED, (0, TITLE_H))
 
 
 def draw_titlebar():
     mx, my = pygame.mouse.get_pos()
-    pygame.draw.rect(SCREEN, TITLE_BG, (0, 0, WIDTH, TITLE_H))
+    w = SCREEN.get_width()
+    tb_min, tb_max, tb_close = tb_min_rect(), tb_max_rect(), tb_close_rect()
+    pygame.draw.rect(SCREEN, TITLE_BG, (0, 0, w, TITLE_H))
     x = 10
     if TITLE_ICON:
         SCREEN.blit(TITLE_ICON, (x, (TITLE_H - TITLE_ICON.get_height()) // 2))
         x += TITLE_ICON.get_width() + 8
     label = TB_FONT.render("DAMPA", True, (255, 255, 255))
     SCREEN.blit(label, (x, (TITLE_H - label.get_height()) // 2))
-    if TB_MIN.collidepoint(mx, my):
-        pygame.draw.rect(SCREEN, (55, 55, 55), TB_MIN)
-    if TB_CLOSE.collidepoint(mx, my):
-        pygame.draw.rect(SCREEN, (232, 17, 35), TB_CLOSE)
+    if tb_min.collidepoint(mx, my):
+        pygame.draw.rect(SCREEN, (55, 55, 55), tb_min)
+    if tb_max.collidepoint(mx, my):
+        pygame.draw.rect(SCREEN, (55, 55, 55), tb_max)
+    if tb_close.collidepoint(mx, my):
+        pygame.draw.rect(SCREEN, (232, 17, 35), tb_close)
+
     cy = TITLE_H // 2
-    pygame.draw.line(SCREEN, (255, 255, 255), (TB_MIN.centerx - 6, cy), (TB_MIN.centerx + 5, cy), 1)
-    cx = TB_CLOSE.centerx
+    # minimize: maliit na guhit
+    pygame.draw.line(SCREEN, (255, 255, 255), (tb_min.centerx - 6, cy), (tb_min.centerx + 5, cy), 1)
+    # maximize / restore: maliit na parisukat
+    mx_c, my_c = tb_max.centerx, cy
+    if is_maximized():
+        pygame.draw.rect(SCREEN, (255, 255, 255), (mx_c - 5, my_c - 6, 9, 9), 1)
+        pygame.draw.rect(SCREEN, (255, 255, 255), (mx_c - 1, my_c - 2, 9, 9), 1)
+    else:
+        pygame.draw.rect(SCREEN, (255, 255, 255), (mx_c - 5, my_c - 5, 10, 10), 1)
+    # close: X
+    cx = tb_close.centerx
     pygame.draw.line(SCREEN, (255, 255, 255), (cx - 6, cy - 6), (cx + 5, cy + 5), 1)
     pygame.draw.line(SCREEN, (255, 255, 255), (cx - 6, cy + 5), (cx + 5, cy - 6), 1)
 
@@ -179,14 +308,13 @@ CLOCK = pygame.time.Clock()
 
 
 def window_to_canvas(pos):
-    display = pygame.display.get_surface()
-    if display is None:
-        return 0, 0
-    display_width, display_height = display.get_size()
+    """window mouse position -> 1300x700 game coordinates (umaayon sa laki ng window)"""
+    display_width, display_height = SCREEN.get_size()
     if display_width <= 0 or display_height <= TITLE_H:
         return 0, 0
-    return (int(pos[0] * WIDTH / display_width),
-            int((pos[1] - TITLE_H) * HEIGHT / (display_height - TITLE_H)))
+    x = int(pos[0] * WIDTH / display_width)
+    y = int((pos[1] - TITLE_H) * HEIGHT / (display_height - TITLE_H))
+    return (max(0, min(WIDTH - 1, x)), max(0, min(HEIGHT - 1, y)))
 
 
 # =====================================================================

@@ -771,6 +771,9 @@ def main():
                 run = False
                 continue
 
+            if event.type == pygame.VIDEORESIZE:
+                continue                      # present() na ang nag-a-adjust sa bagong laki
+
             tb = handle_titlebar_event(event)
             if tb == "close":
                 run = False
@@ -1062,6 +1065,7 @@ def main():
         update_cursor(HAND_HOT[0])      # mouse pointer becomes a hand over the gear / sliders
         HAND_HOT[0] = False
 
+        present()                       # i-scale ang 1300x700 game sa laki ng window
         draw_titlebar()
         pygame.display.update()
 
