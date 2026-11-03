@@ -828,5 +828,30 @@ LOGO_HAS_FRAME = None     # None = AUTO (the game checks if your picture already
                           # True / False = force it
 MODE_BACK = pygame.Rect(INFO_PANEL.right - 190, 618, 170, 54)
 
-
+# --- wager screen, shown over the blurred game after choosing a mode
+BET_PANEL = pygame.Rect(0, 0, 460, 340)
+BET_PANEL.center = (WIDTH // 2, HEIGHT // 2)
+BET_HEADER = pygame.Rect(0, 0, 340, 58)
+BET_HEADER.midbottom = (BET_PANEL.centerx, BET_PANEL.y + 22)
+BET_PLAYER_RECTS = []
+BET_AMOUNT_RECTS = []
+BET_MINUS_RECTS = []
+BET_PLUS_RECTS = []
+BET_SUBMIT_RECTS = []
+for _i in range(2):
+    _cx = BET_PANEL.x + 125 + _i * 210
+    BET_PLAYER_RECTS.append(pygame.Rect(0, 0, 164, 36))
+    BET_PLAYER_RECTS[-1].center = (_cx, BET_PANEL.y + 70)
+    BET_AMOUNT_RECTS.append(pygame.Rect(0, 0, 164, 60))
+    BET_AMOUNT_RECTS[-1].center = (_cx, BET_PANEL.y + 145)
+    BET_MINUS_RECTS.append(pygame.Rect(0, 0, 58, 34))
+    BET_MINUS_RECTS[-1].center = (_cx - 35, BET_PANEL.y + 194)
+    BET_PLUS_RECTS.append(pygame.Rect(0, 0, 58, 34))
+    BET_PLUS_RECTS[-1].center = (_cx + 35, BET_PANEL.y + 194)
+    BET_SUBMIT_RECTS.append(pygame.Rect(0, 0, 164, 34))
+    BET_SUBMIT_RECTS[-1].center = (_cx, BET_PANEL.y + 232)
+BET_BACK = pygame.Rect(0, 0, 164, 48)
+BET_BACK.midleft = (BET_PANEL.x + 28, BET_PANEL.bottom - 34)
+BET_START = pygame.Rect(0, 0, 164, 48)
+BET_START.midright = (BET_PANEL.right - 28, BET_PANEL.bottom - 34)
 

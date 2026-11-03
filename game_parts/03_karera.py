@@ -805,6 +805,7 @@ class Game:
         if self.phase == "meter" and not self.player.locked:
             timer_txt = f"TIME: {int(math.ceil(max(0.0, METER_TIMEOUT - self.t)))}"
         hud_pill(WIN, HUD_TIMER, timer_txt)
+        draw_match_hud(WIN, self.pvp, "karera")
         text_center(SMALL_FONT, self.hud_message(), TEXT_COLOR, (WIDTH // 2, 172), shadow=True)
 
         # ---- friendly pop-up messages ----

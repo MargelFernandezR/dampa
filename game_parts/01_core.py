@@ -72,9 +72,21 @@ def play_bgm(track):
 # HOME PAGE BACKGROUND MUSIC: starts when the opening intro is finished (see main())
 WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
-WIN = pygame.display.set_mode((WIDTH, HEIGHT))
+pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+WIN = pygame.Surface((WIDTH, HEIGHT))
+MATCH_BET = {"resource": "GOMA", "total": 0}
 pygame.display.set_caption("DAMPA")
 CLOCK = pygame.time.Clock()
+
+
+def window_to_canvas(pos):
+    display = pygame.display.get_surface()
+    if display is None:
+        return 0, 0
+    display_width, display_height = display.get_size()
+    if display_width <= 0 or display_height <= 0:
+        return 0, 0
+    return int(pos[0] * WIDTH / display_width), int(pos[1] * HEIGHT / display_height)
 
 
 # =====================================================================
@@ -376,5 +388,3 @@ def finish_fx(final):
         play("lose")
     else:
         play("tie")
-
-

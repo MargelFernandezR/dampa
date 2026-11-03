@@ -1108,6 +1108,7 @@ class PogsGame:
         elif self.phase == "meter":
             t_txt = f"TIME: {int(math.ceil(max(0.0, TURN_TIME - self.t)))}"
         hud_pill(surf, HUD_TIMER, t_txt)
+        draw_match_hud(surf, self.pvp, "pogs")
 
         if self.phase in ("end", "transition"):
             return
@@ -1203,5 +1204,3 @@ class PogsGame:
         self.text(self.win, self.f_small, cheer, LINE_BROWN, (END_PANEL.centerx, END_PANEL.y + 148), shadow=False)
         button(END_AGAIN, "PLAY AGAIN", END_AGAIN.collidepoint(mouse), self.f_mid)
         button(END_MENU, "MENU", END_MENU.collidepoint(mouse), self.f_mid)
-
-

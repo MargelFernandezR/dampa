@@ -21,6 +21,119 @@ def draw_logo(now, amp=1.0):
         WIN.blit(img, LOGO_POS.move(0, int(math.sin(now / 420.0 - i * 0.9) * 8 * amp)))
 
 
+INVENTORY_FILE = "../inventory.json"
+INVENTORY_DEFAULT = {
+    "player1": {"goma": 100, "pogs": 100},
+    "player2": {"goma": 100, "pogs": 100},
+}
+BET_INFO_FONT = PixelFont(18)
+
+
+def load_inventory():
+    if not os.path.exists(INVENTORY_FILE):
+        return {player: values.copy() for player, values in INVENTORY_DEFAULT.items()}
+    try:
+        with open(INVENTORY_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"[dampa] could not load inventory '{INVENTORY_FILE}': {e}")
+        return {player: values.copy() for player, values in INVENTORY_DEFAULT.items()}
+
+    inventory = {}
+    for player, defaults in INVENTORY_DEFAULT.items():
+        inventory[player] = {}
+        player_data = data.get(player, {}) if isinstance(data, dict) else {}
+        if not isinstance(player_data, dict):
+            print(f"[dampa] invalid inventory entry for {player}; using defaults")
+            player_data = {}
+        for resource, default in defaults.items():
+            amount = player_data.get(resource, default)
+            if not isinstance(amount, int) or isinstance(amount, bool) or amount < 0:
+                print(f"[dampa] invalid {player} {resource} balance; using {default}")
+                amount = default
+            inventory[player][resource] = amount
+    return inventory
+
+
+def save_inventory():
+    try:
+        with open(INVENTORY_FILE, "w", encoding="utf-8") as f:
+            json.dump(INVENTORY, f)
+    except OSError as e:
+        print(f"[dampa] could not save inventory '{INVENTORY_FILE}': {e}")
+        return False
+    return True
+
+
+INVENTORY = load_inventory()
+
+
+def draw_match_hud(target, pvp, mode):
+    sides = (("player1", "P1", 8), ("player2", "P2", WIDTH - 178)) if pvp else \
+        (("player2", "YOU", 8),)
+    for account, label, x in sides:
+        for row, name in enumerate(("goma", "pogs")):
+            rect = pygame.Rect(x, 8 + row * 38, 170, 32)
+            hud_pill(target, rect, f"{label} {name.upper()}: {INVENTORY[account][name]}", DESC_FONT)
+
+    resource_label = "GOMA" if mode == "karera" else "POGS"
+    if mode == "karera":
+        x, y = WIDTH // 2 - 74, HEIGHT - 78
+    else:
+        x, y = WIDTH - 168, HEIGHT - 78
+    pot_rect = pygame.Rect(x, y, 148, 34)
+    bet_rect = pygame.Rect(x, y + 38, 148, 34)
+    hud_pill(target, pot_rect, f"{MATCH_BET['total']} {resource_label}", SMALL_FONT)
+    hud_pill(target, bet_rect, "BET", SMALL_FONT)
+
+
+def draw_bet_popup(mouse, mode, pvp, amounts, submitted):
+    resource = "goma" if mode == "karera" else "pogs"
+    resource_label = resource.upper()
+    veil = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    veil.fill((0, 0, 0, 115))
+    WIN.blit(veil, (0, 0))
+    paper_box(BET_PANEL)
+    hud_pill(WIN, BET_HEADER, "PLACE A BET", BIG_FONT)
+
+    labels = ("PLAYER 1", "PLAYER 2") if pvp else ("BOT (MATCH)", "PLAYER")
+    accounts = ("player1", "player2") if pvp else (None, "player2")
+    for i, (label, account) in enumerate(zip(labels, accounts)):
+        hud_pill(WIN, BET_PLAYER_RECTS[i], label, SMALL_FONT)
+        if account:
+            balance_text = f"BALANCE: {INVENTORY[account][resource]} {resource_label}"
+        else:
+            balance_text = "AUTO MATCH"
+        text_center(BET_INFO_FONT, balance_text, BROWN,
+                    (BET_AMOUNT_RECTS[i].centerx, BET_AMOUNT_RECTS[i].top - 12))
+        hud_box(WIN, BET_AMOUNT_RECTS[i], (128, 69, 27))
+        shown_amount = amounts[i] if pvp or i == 1 else amounts[1]
+        text_center(TITLE_FONT, str(shown_amount), WHITE, BET_AMOUNT_RECTS[i].center)
+        if not pvp and i == 0:
+            button(BET_SUBMIT_RECTS[i], "AUTO MATCH", False, DESC_FONT)
+            continue
+        is_locked = submitted[i]
+        button(BET_MINUS_RECTS[i], "-", not is_locked and BET_MINUS_RECTS[i].collidepoint(mouse))
+        button(BET_PLUS_RECTS[i], "+", not is_locked and BET_PLUS_RECTS[i].collidepoint(mouse))
+        button(BET_SUBMIT_RECTS[i], "SUBMITTED" if is_locked else "SUBMIT",
+               not is_locked and BET_SUBMIT_RECTS[i].collidepoint(mouse), DESC_FONT)
+
+    button(BET_BACK, "BACK", BET_BACK.collidepoint(mouse))
+    ready = all(submitted) if pvp else submitted[1]
+    button(BET_START, "START", ready and BET_START.collidepoint(mouse))
+    if ready:
+        total = sum(amounts) if pvp else amounts[1] * 2
+        text_center(DESC_FONT, f"TOTAL POT: {total} {resource_label}", BROWN,
+                    (BET_PANEL.centerx, BET_PANEL.bottom - 74))
+    elif pvp and submitted[0]:
+        text_center(DESC_FONT, "PASS TO PLAYER 2 TO SUBMIT", BROWN,
+                    (BET_PANEL.centerx, BET_PANEL.bottom - 74))
+    else:
+        text_center(DESC_FONT, "SUBMIT YOUR BET TO CONTINUE", BROWN,
+                    (BET_PANEL.centerx, BET_PANEL.bottom - 74))
+    draw_notice((WIDTH // 2, HEIGHT - 26))
+
+
 def draw_menu(mouse, reveal=1.0):
     now = pygame.time.get_ticks()
     WIN.blit(BG, (0, 0))
@@ -755,18 +868,101 @@ def main():
     logo_sfx_done = False
     bgm_wait = None
     countdown = None
+    bet_snapshot = None
+    bet_mode = None
+    bet_pvp = False
+    bet_amounts = [0, 0]
+    bet_submitted = [False, False]
+    bet_settled = True
+
+    def open_bet(match, mode):
+        nonlocal game, screen, bet_snapshot, bet_mode, bet_pvp
+        nonlocal bet_amounts, bet_submitted, bet_settled
+        game = match
+        bet_mode = mode
+        bet_pvp = PVP
+        resource = "goma" if mode == "karera" else "pogs"
+        bet_amounts = [
+            min(1, INVENTORY["player1"][resource]),
+            min(1, INVENTORY["player2"][resource]),
+        ]
+        bet_submitted = [False, False] if bet_pvp else [True, False]
+        bet_settled = False
+        MATCH_BET["resource"] = resource.upper()
+        MATCH_BET["total"] = 0
+        game.draw((0, 0))
+        bet_snapshot = blur_surface(WIN)
+        screen = "bet"
+
+    def start_bet_match():
+        nonlocal screen
+        resource = "goma" if bet_mode == "karera" else "pogs"
+        accounts = ("player1", "player2") if bet_pvp else (None, "player2")
+        stakes = bet_amounts[:] if bet_pvp else [bet_amounts[1], bet_amounts[1]]
+        old_balances = {
+            account: INVENTORY[account][resource]
+            for account in accounts if account is not None
+        }
+        for i, account in enumerate(accounts):
+            if account is not None:
+                if stakes[i] > INVENTORY[account][resource]:
+                    set_notice(f"NOT ENOUGH {resource.upper()}!")
+                    return
+                INVENTORY[account][resource] -= stakes[i]
+        if not save_inventory():
+            for account, balance in old_balances.items():
+                INVENTORY[account][resource] = balance
+            set_notice("BET NOT STARTED: INVENTORY COULD NOT BE SAVED")
+            return
+
+        MATCH_BET["total"] = sum(stakes)
+        screen = "game"
+        play_bgm("karera" if bet_mode == "karera" else "pogs")
+
+    def settle_bet():
+        nonlocal bet_settled
+        if bet_settled or game.phase != "end":
+            return
+        resource = "goma" if bet_mode == "karera" else "pogs"
+        before = {
+            account: INVENTORY[account][resource]
+            for account in ("player1", "player2")
+        }
+        result = game.final
+        if result in ("tie", "ptie"):
+            if bet_pvp:
+                INVENTORY["player1"][resource] += bet_amounts[0]
+                INVENTORY["player2"][resource] += bet_amounts[1]
+            else:
+                INVENTORY["player2"][resource] += bet_amounts[1]
+        elif bet_pvp:
+            winner = "player1" if result in ("p1", "loss") else "player2"
+            INVENTORY[winner][resource] += MATCH_BET["total"]
+        elif result in ("win", "p2"):
+            INVENTORY["player2"][resource] += MATCH_BET["total"]
+
+        if not save_inventory():
+            for account, balance in before.items():
+                INVENTORY[account][resource] = balance
+            set_notice("BET SETTLEMENT COULD NOT BE SAVED")
+        bet_settled = True
 
     while run:
         dt = min(CLOCK.tick(60) / 1000.0, 0.05)
         FX_DT[0] = dt
         if NOTICE[1] > 0:
             NOTICE[1] = max(0.0, NOTICE[1] - dt)
-        mouse = pygame.mouse.get_pos()
+        mouse = window_to_canvas(pygame.mouse.get_pos())
         MOUSE_MOVED[0] = pygame.mouse.get_rel() != (0, 0)
         AMBIENT.update(dt)
         update_confetti(dt)
 
         for event in pygame.event.get():
+            if hasattr(event, "pos"):
+                event = pygame.event.Event(
+                    event.type,
+                    {**event.dict, "pos": window_to_canvas(event.pos)},
+                )
             if event.type == pygame.QUIT:
                 run = False
                 continue
@@ -777,6 +973,47 @@ def main():
             if screen == "intro":                         # any click / key skips the opening
                 if event.type in (pygame.KEYDOWN, pygame.MOUSEBUTTONDOWN):
                     intro_t = INTRO_TOTAL
+                continue
+
+            if screen == "bet":
+                if event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    game = None
+                    screen = "botmodes"
+                    continue
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    pos = event.pos
+                    if BET_BACK.collidepoint(pos):
+                        play("click")
+                        game = None
+                        screen = "botmodes"
+                        continue
+                    ready = all(bet_submitted) if bet_pvp else bet_submitted[1]
+                    if BET_START.collidepoint(pos) and ready:
+                        play("click")
+                        start_bet_match()
+                        continue
+
+                    for i in range(2):
+                        if not bet_pvp and i == 0:
+                            continue
+                        if bet_submitted[i]:
+                            continue
+                        account = ("player1", "player2")[i] if bet_pvp else "player2"
+                        resource = "goma" if bet_mode == "karera" else "pogs"
+                        if BET_MINUS_RECTS[i].collidepoint(pos):
+                            bet_amounts[i] = max(0, bet_amounts[i] - 1)
+                        elif BET_PLUS_RECTS[i].collidepoint(pos):
+                            bet_amounts[i] = min(
+                                INVENTORY[account][resource], bet_amounts[i] + 1)
+                        elif BET_SUBMIT_RECTS[i].collidepoint(pos):
+                            if bet_amounts[i] > INVENTORY[account][resource]:
+                                set_notice(f"NOT ENOUGH {resource.upper()}!")
+                            else:
+                                bet_submitted[i] = True
+                                play("click")
+                        else:
+                            continue
+                        break
                 continue
 
             # gear click = press on it, release on it (so the squash animation is visible)
@@ -920,29 +1157,21 @@ def main():
                             if key == "pogs" and PVP:
                                 # Player vs Player Pogs: no level required, both players play
                                 play("click")
-                                game = PogsGame(add_result, pvp=True)
                                 paused = False
-                                screen = "game"
-                                play_bgm("pogs")
+                                open_bet(PogsGame(add_result, pvp=True), "pogs")
                             elif key == "pogs":
                                 if DIFF_CHOSEN:
                                     play("click")
-                                    game = PogsGame(add_result)
                                     paused = False
-                                    screen = "game"
-                                    play_bgm("pogs")
+                                    open_bet(PogsGame(add_result), "pogs")
                                 else:
                                     play("miss")
                                     set_notice("PICK A LEVEL FIRST!")
                             elif DIFF_CHOSEN:
                                 play("click")
-                                game = Game(pvp=PVP) if key == "karera" else PogsGame(add_result)
                                 paused = False
-                                screen = "game"
-                                if key == "karera":
-                                    play_bgm("karera")
-                                else:
-                                    play_bgm("pogs")
+                                match = Game(pvp=PVP) if key == "karera" else PogsGame(add_result)
+                                open_bet(match, key)
                             else:
                                 play("miss")
                                 set_notice("PICK A LEVEL FIRST!")
@@ -1031,6 +1260,9 @@ def main():
             draw_vs_select(mouse)
         elif screen == "botmodes":
             draw_mode_select(mouse)
+        elif screen == "bet":
+            WIN.blit(bet_snapshot, (0, 0))
+            draw_bet_popup(mouse, bet_mode, bet_pvp, bet_amounts, bet_submitted)
         else:
             if paused:
                 draw_pause(mouse, pause_view, snapshot)       # game is frozen: no update()
@@ -1038,6 +1270,8 @@ def main():
                 counting = countdown is not None and countdown < 3.0
                 if not counting:
                     game.update(dt)
+                if game.phase == "end":
+                    settle_bet()
                 game.draw(mouse)
                 if countdown is not None:
                     draw_countdown(countdown)
@@ -1054,7 +1288,12 @@ def main():
         update_cursor(HAND_HOT[0])      # mouse pointer becomes a hand over the gear / sliders
         HAND_HOT[0] = False
 
-        pygame.display.update()
+        display = pygame.display.get_surface()
+        if display is not None:
+            display_size = display.get_size()
+            if display_size[0] > 0 and display_size[1] > 0:
+                pygame.transform.scale(WIN, display_size, display)
+                pygame.display.update()
 
     pygame.quit()
     sys.exit()
