@@ -72,7 +72,56 @@ def play_bgm(track):
 # HOME PAGE BACKGROUND MUSIC: starts when the opening intro is finished (see main())
 WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
-pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
+
+
+# ---------------------------------------------------------------------
+#  WINDOW ICON + BLACK TITLE BAR
+#  Ilagay ang "Capture-removebg-preview.png" sa parehong folder ng main.py
+# ---------------------------------------------------------------------
+def set_window_icon(filename="Capture-removebg-preview.png"):
+    """palitan ang icon sa kaliwang taas ng window (dapat tawagin BAGO ang set_mode)"""
+    try:
+        icon = pygame.image.load(filename)
+        rect = icon.get_bounding_rect()                       # alisin ang transparent na gilid
+        if rect.width and rect.height:
+            icon = icon.subsurface(rect).copy()
+        side = max(icon.get_size())                           # gawing square para hindi pipi
+        sq = pygame.Surface((side, side), pygame.SRCALPHA)
+        sq.blit(icon, ((side - icon.get_width()) // 2, (side - icon.get_height()) // 2))
+        icon = pygame.transform.smoothscale(sq, (64, 64))
+        pygame.display.set_icon(icon)
+    except (pygame.error, FileNotFoundError):
+        print(f"[dampa] could not load window icon '{filename}'")
+
+
+def set_black_titlebar():
+    """gawing itim ang blue na title bar / border ng window (Windows lang)"""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+        hwnd = pygame.display.get_wm_info()["window"]
+        dwm = ctypes.windll.dwmapi
+        dwm.DwmSetWindowAttribute.argtypes = [wintypes.HWND, wintypes.DWORD,
+                                              ctypes.c_void_p, wintypes.DWORD]
+
+        def set_attr(attr, value):
+            v = ctypes.c_int(value)
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v), ctypes.sizeof(v))
+
+        set_attr(20, 1)            # dark mode title bar (Windows 10 20H1+ / Windows 11)
+        set_attr(19, 1)            # dark mode title bar (mas lumang Windows 10)
+        set_attr(34, 0x00000000)   # border color = black   (Windows 11)
+        set_attr(35, 0x00000000)   # title bar color = black (Windows 11)
+        set_attr(36, 0x00FFFFFF)   # title text color = white (Windows 11)
+    except Exception as e:
+        print("[dampa] could not change title bar color:", e)
+
+
+set_window_icon()                                   # 1) icon muna, bago ang window
+pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)   # 2) gawin ang window
+set_black_titlebar()                                # 3) saka gawing black ang title bar
 WIN = pygame.Surface((WIDTH, HEIGHT))
 pygame.display.set_caption("DAMPA")
 CLOCK = pygame.time.Clock()
