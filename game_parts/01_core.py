@@ -74,7 +74,6 @@ WIDTH, HEIGHT = 1300, 700
 HALF = WIDTH // 2
 pygame.display.set_mode((WIDTH, HEIGHT), pygame.RESIZABLE)
 WIN = pygame.Surface((WIDTH, HEIGHT))
-MATCH_BET = {"resource": "GOMA", "total": 0}
 pygame.display.set_caption("DAMPA")
 CLOCK = pygame.time.Clock()
 
