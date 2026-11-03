@@ -1055,11 +1055,8 @@ class PogsGame:
         surf.blit(img, img.get_rect(midleft=(rect.x + 14, rect.centery)))
 
     def pill(self, surf, rect, text, font=None):
-        """gold pixel pill (same look as the menu buttons) with centered dark-brown text"""
-        font = font or self.f_hud
-        img = btn_surface(rect.w, rect.h, "gold")
-        surf.blit(img, img.get_rect(center=rect.center))
-        self.text(surf, font, text, BTN_PAL["gold"][0], rect.center, shadow=False)
+        """gold pill using the same button picture/colors as the Dampa Karera HUD"""
+        hud_pill(surf, rect, text, font or self.f_hud)
 
     def text(self, surf, font, txt, color, center, shadow=True, alpha=255):
         img = font.render(txt, True, color)
